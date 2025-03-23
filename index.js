@@ -81,10 +81,10 @@ async function uploadFile(filePath) {
       caption: fileName, // Use fileName como legenda
       supportsStreaming: true,
       progressCallback: (progress) => {
-        console.log(`Uploaded: ${Math.round(progress * 100)}%`);
+        process.stdout.write(`\rUploaded: ${Math.round(progress * 100)}%`); // Atualiza a mesma linha
       },
     });
-    console.log(`File ${filePath} uploaded successfully!`);
+    console.log(`\nFile ${filePath} uploaded successfully!`); // Nova linha após o upload
     fs.unlinkSync(filePath);
     return;
   } catch (error) {
