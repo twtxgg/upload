@@ -1,133 +1,118 @@
-const express = require("express");
-const fs = require("fs");
-const axios = require("axios");
-const { TelegramClient } = require("telegram");
-const { StringSession } = require("telegram/sessions");
-const path = require("path");
-require("dotenv").config();
+const telegramAuthToken = `7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE`;
+const webhookEndpoint = "/endpoint";
+const nodeServerUrl = "http://ec2-18-220-113-247.us-east-2.compute.amazonaws.com:3000";
 
-const app = express();
-const port = process.env.PORT || 3000;
-app.use(express.json());
-
-const apiId = Number(process.env.API_ID);
-const apiHash = process.env.API_HASH;
-const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE"; // Usando o token do bot fornecido
-
-const sessionFile = "session.txt";
-let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
-const stringSession = new StringSession(sessionString);
-const client = new TelegramClient(stringSession, apiId, apiHash, {
-  connectionRetries: 5,
+addEventListener("fetch", (event) => {
+  event.respondWith(handleIncomingRequest(event));
 });
 
-let fileName;
+async function handleIncomingRequest(event) {
+  let url = new URL(event.request.url);
+  let path = url.pathname;
+  let method = event.request.method;
+  let workerUrl = `${url.protocol}//${url.host}`;
 
-async function startClient() {
-  await client.start({
-    botAuthToken: botToken, // Usando o token do bot
-    onError: (err) => console.error(err),
-  });
-  console.log("Conectado ao Telegram");
-  fs.writeFileSync(sessionFile, client.session.save());
-}
+  if (method === "POST" && path === webhookEndpoint) {
+    const update = await event.request.json();
+    console.log("Mensagem recebida do Telegram:", JSON.stringify(update));
+    event.waitUntil(processUpdate(update));
+    return new Response("Ok");
+  } else if (method === "GET" && path === "/configure-webhook") {
+    const url = `https://api.telegram.org/bot${telegramAuthToken}/setWebhook?url=${workerUrl}${webhookEndpoint}`;
+    const response = await fetch(url);
 
-async function downloadFile(fileUrl) {
-  try {
-    const urlObj = new URL(fileUrl);
-    const encodedFileName = urlObj.pathname;
-    const decodedFileName = decodeURIComponent(encodedFileName);
-    fileName = path.basename(decodedFileName);
-
-    const writer = fs.createWriteStream(path.join(__dirname, "upload", fileName));
-
-    const response = await axios({
-      method: "get",
-      url: fileUrl,
-      responseType: "stream",
-    });
-
-    response.data.pipe(writer);
-
-    return new Promise((resolve, reject) => {
-      writer.on("finish", () => resolve(fileName));
-      writer.on("error", (err) => {
-        reject(err);
-      });
-    });
-  } catch (err) {
-    console.error("Erro durante a requisição axios:", err.message);
-    throw err;
+    if (response.ok) {
+      return new Response("Webhook set successfully", { status: 200 });
+    } else {
+      return new Response("Failed to set webhook", { status: response.status });
+    }
+  } else {
+    return new Response("Not found", { status: 404 });
   }
 }
 
-async function uploadFile(filePath, chatId, threadId, initialMessageId) {
-  try {
-    const me = await client.getMe();
-    console.log("Informação do bot:", me);
+async function processUpdate(update) {
+  if ("message" in update) {
+    const chatId = update.message.chat.id;
+    const userText = update.message.text;
+    let threadId = update.message.message_thread_id;
+    const messageId = update.message.message_id;
 
-    const chat = await client.getEntity(chatId);
-    console.log("Informação do chat:", chat);
+    console.log("chatId:", chatId, "threadId:", threadId, "userText:", userText);
 
-    let fileOptions = {
-      file: filePath,
-      caption: fileName,
-      supportsStreaming: true,
-    };
-
-    if (threadId) {
-      fileOptions.replyTo = threadId;
-    }
-
-    console.log("Enviando arquivo para chatId:", chatId);
-    await client.sendFile(chatId, fileOptions);
-
-    // Deleta a mensagem inicial que continha a URL
-    if (initialMessageId) {
+    if (isValidUrl(userText)) {
       try {
-        await client.deleteMessages(chatId, [initialMessageId], { revoke: true });
-      } catch (deleteMsgError) {
-        console.error("Erro ao deletar mensagem inicial:", deleteMsgError);
-      }
-    }
+        const body = threadId ? JSON.stringify({ fileUrl: userText, chatId: chatId, threadId: threadId, messageId: messageId }) : JSON.stringify({ fileUrl: userText, chatId: chatId, messageId: messageId });
+        console.log("Corpo da requisição para o Node.js:", JSON.stringify(body));
 
-    console.log(`\nArquivo ${filePath} enviado com sucesso!`);
-    fs.unlinkSync(filePath);
-    return;
-  } catch (error) {
-    console.error("Erro ao enviar arquivo:", error);
-    throw new Error("Falha ao enviar arquivo para o Telegram");
+        const response = await fetch(`${nodeServerUrl}/upload`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Requested-with": "XMLHttpRequest",
+          },
+          body: body,
+        });
+
+        const responseJson = await response.json();
+
+        if (responseJson.success) {
+          const deleteResult = await deleteMessageFromBot(chatId, messageId);
+          if (deleteResult) {
+            console.log("Mensagem original deletada com sucesso.");
+          } else {
+            console.log("Falha ao deletar a mensagem original.");
+          }
+        }
+        console.log("Resposta do Node.js:", JSON.stringify(responseJson));
+      } catch (error) {
+        console.error("Erro ao enviar requisição:", error);
+        const responseText = `Error uploading file: ${error.message}`;
+        await sendMessageToBot(chatId, responseText);
+      }
+    } else if (
+      !(
+        update.message.document ||
+        update.message.text.startsWith("Uploading file") ||
+        update.message.text.startsWith("Downloading file")
+      )
+    ) {
+      const responseText = "Invalid URL!";
+      await sendMessageToBot(chatId, responseText);
+    }
   }
 }
 
-app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, threadId } = req.body;
-
-  if (!fileUrl || !chatId) {
-    return res.status(400).json({ error: "URL do arquivo e ID do chat são obrigatórios" });
-  }
-
+function isValidUrl(string) {
   try {
-    await startClient();
-    const filePath = await downloadFile(fileUrl);
-    const chat = await client.getEntity(chatId);
-
-    // Envia a mensagem inicial com a URL
-    const initialMessage = await client.sendMessage(chatId, { message: fileUrl });
-
-    if (chat.className === "User" || chat.className === "Chat") {
-      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId, initialMessage.id);
-    } else if (chat.className === "Channel") {
-      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId, initialMessage.id);
-    }
-
-    res.status(200).json({ message: "Arquivo enviado com sucesso!" });
-  } catch (error) {
-    console.error("Erro:", error);
-    res.status(500).json({ error: error.message });
+    new URL(string);
+    return true;
+  } catch (_) {
+    return false;
   }
-});
+}
 
-app.listen(port, () => {
-  console.log(`Servidor rodando na porta ${port}`);
-});
+async function sendMessageToBot(chatId, message) {
+  const url = `https://api.telegram.org/bot${telegramAuthToken}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(
+    message
+  )}`;
+  await fetch(url);
+}
+
+async function deleteMessageFromBot(chatId, messageId) {
+  try {
+    const url = `https://api.telegram.org/bot${telegramAuthToken}/deleteMessage?chat_id=${chatId}&message_id=${messageId}`;
+    const response = await fetch(url);
+    const responseJson = await response.json();
+
+    if (responseJson.ok) {
+      return true; // Mensagem deletada com sucesso
+    } else {
+      console.error("Erro ao deletar mensagem:", responseJson);
+      return false; // Falha ao deletar a mensagem
+    }
+  } catch (error) {
+    console.error("Erro ao deletar mensagem:", error);
+    return false; // Falha ao deletar a mensagem
+  }
+}
