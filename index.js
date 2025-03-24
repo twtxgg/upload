@@ -102,7 +102,9 @@ async function uploadFile(filePath, chatId, threadId) {
 
       try {
         if (sentMessage && sentMessage.id) {
-            await client.deleteMessages(chatId, [sentMessage.id]);
+            // Adiciona um atraso antes de deletar a mensagem
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await client.deleteMessages(chatId, [sentMessage.id], { revoke: true });
         } else {
             console.error("sentMessage ou sentMessage.id não definidos ao deletar.");
         }
