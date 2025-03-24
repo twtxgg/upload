@@ -22,7 +22,7 @@ const client = new TelegramClient(stringSession, apiId, apiHash, {
   connectionRetries: 5,
 });
 
-let fileName; // Adicionado para escopo global
+let fileName;
 
 async function startClient() {
   await client.start({
@@ -41,7 +41,7 @@ async function downloadFile(fileUrl) {
     const urlObj = new URL(fileUrl);
     const encodedFileName = urlObj.pathname;
     const decodedFileName = decodeURIComponent(encodedFileName);
-    fileName = path.basename(decodedFileName); // Atribui a fileName aqui
+    fileName = path.basename(decodedFileName);
 
     const writer = fs.createWriteStream(path.join(__dirname, "upload", fileName));
 
@@ -110,17 +110,22 @@ app.post("/upload", async (req, res) => {
     const filePath = await downloadFile(fileUrl);
     const chat = await client.getEntity(chatId);
 
-    if (chat.className === "User" || chat.className === "Chat") {
+    if (chat.className === "User" || chat.className === "Chat" || chat.className === "Channel") {
       await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
-    } else if (chat.className === "Channel") {
-      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
+      res.status(200).json({ message: "File uploaded successfully!" });
+    } else {
+      res.status(400).json({ error: "Invalid chat type." });
     }
 
-    res.status(200).json({ message: "File uploaded successfully!" });
   } catch (error) {
     console.error("Error:", error);
     res.status(500).json({ error: error.message });
   }
+});
+
+// Servir o arquivo HTML
+app.get('/test', (req, res) => {
+    res.sendFile(path.join(__dirname, 'test.html'));
 });
 
 app.listen(port, () => {
