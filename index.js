@@ -206,4 +206,11 @@ app.post("/upload", async (req, res) => {
         res.status(200).json({ success: true });
       } catch (deleteOriginalMessageError) {
         console.error("Erro ao deletar mensagem original:", deleteOriginalMessageError);
-        res.status(500).json({ success: false
+        res.status(500).json({ success: false }); // Fechando o objeto JSON aqui
+      }
+    }
+  } catch (error) {
+    console.error("Erro geral:", error);
+    res.status(500).json({ error: "Erro interno do servidor" });
+  }
+});
