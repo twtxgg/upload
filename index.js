@@ -1,11 +1,12 @@
 const { TelegramClient, Api } = require("telegram");
 const { StringSession } = require("telegram/sessions");
+require("dotenv").config();
 
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE"; // Token do seu bot
+const botToken = process.env.BOT_TOKEN; // Usando BOT_TOKEN do .env
 
-const stringSession = new StringSession(""); // Use uma sessão vazia para teste
+const stringSession = new StringSession("");
 
 const client = new TelegramClient(stringSession, apiId, apiHash, {
   connectionRetries: 5,
