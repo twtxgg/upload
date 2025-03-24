@@ -1,7 +1,7 @@
 const express = require("express");
 const fs = require("fs");
 const axios = require("axios");
-const { TelegramClient, Api } = require("telegram");
+const { TelegramClient, Api } = require("telegram"); // Garanta que a importação esteja correta
 const { StringSession } = require("telegram/sessions");
 const readlineSync = require("readline-sync");
 const path = require("path");
@@ -69,7 +69,7 @@ async function uploadFile(filePath, chatId, threadId) {
   try {
     let messageOptions = {
       message: `Uploading file: ${fileName}`,
-      buttons: new Api.ReplyInlineMarkup({
+      buttons: new Api.ReplyInlineMarkup({ // Verifique se Api está definido aqui
         rows: [
           [
             new Api.KeyboardButtonCallback({
@@ -132,7 +132,6 @@ app.post("/upload", async (req, res) => {
   }
 });
 
-// Servir o arquivo HTML
 app.get("/test", (req, res) => {
   res.sendFile(path.join(__dirname, "test.html"));
 });
