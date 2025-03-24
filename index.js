@@ -47,6 +47,10 @@ async function downloadFile(fileUrl) {
 
     const writer = fs.createWriteStream(path.join(__dirname, "upload", fileName));
 
+    await client.sendMessage(bot, {
+      message: `Downloading file: ${fileName}`,
+    });
+
     const response = await axios({
       method: "get",
       url: fileUrl,
@@ -67,20 +71,20 @@ async function downloadFile(fileUrl) {
   }
 }
 
-async function uploadFile(filePath, chatId) { //Adicionado chatId
+async function uploadFile(filePath) {
   try {
-    await client.sendMessage(chatId, { //Usando chatId
+    await client.sendMessage(bot, {
       message: `Uploading file: ${fileName}`,
     });
-    await client.sendFile(chatId, { //Usando chatId
+    await client.sendFile(bot.id, {
       file: filePath,
-      caption: fileName,
+      caption: fileName, // Use fileName como legenda
       supportsStreaming: true,
       progressCallback: (progress) => {
-        process.stdout.write(`\rUploaded: ${Math.round(progress * 100)}%`);
+        process.stdout.write(`\rUploaded: ${Math.round(progress * 100)}%`); // Atualiza a mesma linha
       },
     });
-    console.log(`\nFile ${filePath} uploaded successfully!`);
+    console.log(`\nFile ${filePath} uploaded successfully!`); // Nova linha após o upload
     fs.unlinkSync(filePath);
     return;
   } catch (error) {
@@ -90,14 +94,14 @@ async function uploadFile(filePath, chatId) { //Adicionado chatId
 }
 
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId } = req.body; //Adicionado chatId
-  if (!fileUrl || !chatId) { //Adicionado chatId verificação
+  const { fileUrl } = req.body;
+  if (!fileUrl) {
     return res.status(400).json({ error: "File URL and chat ID are required" });
   }
   try {
     await startClient();
     const filePath = await downloadFile(fileUrl);
-    await uploadFile(path.join(__dirname, "upload", filePath), chatId); //Adicionado chatId
+    await uploadFile(path.join(__dirname, "upload", filePath));
     res.status(200).json({ message: "File uploaded successfully!" });
   } catch (error) {
     console.error("Error:", error);
