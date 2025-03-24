@@ -1,7 +1,7 @@
 const express = require("express");
 const fs = require("fs");
 const axios = require("axios");
-const { TelegramClient } = require("telegram");
+const { TelegramClient, Api } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const readlineSync = require("readline-sync");
 const path = require("path");
@@ -69,6 +69,16 @@ async function uploadFile(filePath, chatId, threadId) {
   try {
     let messageOptions = {
       message: `Uploading file: ${fileName}`,
+      buttons: new Api.ReplyInlineMarkup({
+        rows: [
+          [
+            new Api.KeyboardButtonCallback({
+              text: "Clique aqui para teste",
+              data: "test_button",
+            }),
+          ],
+        ],
+      }),
     };
 
     if (threadId) {
@@ -116,7 +126,6 @@ app.post("/upload", async (req, res) => {
     } else {
       res.status(400).json({ error: "Invalid chat type." });
     }
-
   } catch (error) {
     console.error("Error:", error);
     res.status(500).json({ error: error.message });
@@ -124,8 +133,8 @@ app.post("/upload", async (req, res) => {
 });
 
 // Servir o arquivo HTML
-app.get('/test', (req, res) => {
-    res.sendFile(path.join(__dirname, 'test.html'));
+app.get("/test", (req, res) => {
+  res.sendFile(path.join(__dirname, "test.html"));
 });
 
 app.listen(port, () => {
