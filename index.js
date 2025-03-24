@@ -67,21 +67,30 @@ async function downloadFile(fileUrl) {
   }
 }
 
-async function uploadFile(filePath, chatId, threadId) { //Adicionado threadId
+async function uploadFile(filePath, chatId, threadId) {
   try {
-    await client.sendMessage(chatId, {
+    let messageOptions = {
       message: `Uploading file: ${fileName}`,
-      replyTo: threadId, //Enviando a mensagem na thread
-    });
-    await client.sendFile(chatId, {
+    };
+
+    if (threadId) {
+      messageOptions.replyTo = threadId;
+    }
+
+    await client.sendMessage(chatId, messageOptions);
+
+    let fileOptions = {
       file: filePath,
       caption: fileName,
       supportsStreaming: true,
-      replyTo: threadId, //Enviando o arquivo na thread
-      progressCallback: (progress) => {
-        process.stdout.write(`\rUploaded: ${Math.round(progress * 100)}%`);
-      },
-    });
+    };
+
+    if (threadId) {
+      fileOptions.replyTo = threadId;
+    }
+
+    await client.sendFile(chatId, fileOptions);
+
     console.log(`\nFile ${filePath} uploaded successfully!`);
     fs.unlinkSync(filePath);
     return;
@@ -92,14 +101,22 @@ async function uploadFile(filePath, chatId, threadId) { //Adicionado threadId
 }
 
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, threadId } = req.body; //Adicionado chatId e threadId
-  if (!fileUrl || !chatId || !threadId) { //Verifica se o chatId e threadId existem.
-    return res.status(400).json({ error: "File URL, chat ID, and thread ID are required" });
+  const { fileUrl, chatId, threadId } = req.body;
+
+  if (!fileUrl || !chatId) {
+    return res.status(400).json({ error: "File URL and chat ID are required" });
   }
+
   try {
     await startClient();
     const filePath = await downloadFile(fileUrl);
-    await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId); //Envia o arquivo para o chatId e threadId
+
+    if (threadId) {
+      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
+    } else {
+      await uploadFile(path.join(__dirname, "upload", filePath), chatId);
+    }
+
     res.status(200).json({ message: "File uploaded successfully!" });
   } catch (error) {
     console.error("Error:", error);
