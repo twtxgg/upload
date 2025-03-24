@@ -53,7 +53,13 @@ async function downloadFile(fileUrl) {
     response.data.on("data", (chunk) => {
       downloadedLength += chunk.length;
       const progress = (downloadedLength / totalLength) * 100;
-      console.log(`Download: ${progress.toFixed(2)}%`);
+      process.stdout.clearLine(0); // Limpa a linha atual
+      process.stdout.cursorTo(0); // Move o cursor para o início da linha
+      process.stdout.write(`Download: ${progress.toFixed(2)}%`); // Escreve a porcentagem
+    });
+
+    response.data.on("end", () => {
+      process.stdout.write("\n"); // Adiciona uma nova linha após o download
     });
 
     response.data.pipe(writer);
@@ -101,16 +107,16 @@ async function uploadFile(filePath, chatId, threadId) {
         caption: fileName,
         supportsStreaming: true,
         progressCallback: (progress) => {
-          console.log(`Upload: ${(progress * 100).toFixed(2)}%`);
+          process.stdout.clearLine(0); // Limpa a linha atual
+          process.stdout.cursorTo(0); // Move o cursor para o início da linha
+          process.stdout.write(`Upload: ${(progress * 100).toFixed(2)}%`); // Escreve a porcentagem
         },
       };
 
-      if (threadId) {
-        fileOptions.replyTo = threadId;
-      }
-
       console.log("Enviando arquivo para chatId:", chatId);
       await client.sendFile(chatId, fileOptions);
+
+      process.stdout.write("\n"); // Adiciona uma nova linha após o upload
 
       try {
         if (sentMessage && sentMessage.id) {
