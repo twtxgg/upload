@@ -47,10 +47,6 @@ async function downloadFile(fileUrl) {
 
     const writer = fs.createWriteStream(path.join(__dirname, "upload", fileName));
 
-    await client.sendMessage(bot, {
-      message: `Downloading file: ${fileName}`,
-    });
-
     const response = await axios({
       method: "get",
       url: fileUrl,
@@ -71,20 +67,22 @@ async function downloadFile(fileUrl) {
   }
 }
 
-async function uploadFile(filePath) {
+async function uploadFile(filePath, chatId, threadId) { //Adicionado threadId
   try {
-    await client.sendMessage(bot, {
+    await client.sendMessage(chatId, {
       message: `Uploading file: ${fileName}`,
+      replyTo: threadId, //Enviando a mensagem na thread
     });
-    await client.sendFile(bot.id, {
+    await client.sendFile(chatId, {
       file: filePath,
-      caption: fileName, // Use fileName como legenda
+      caption: fileName,
       supportsStreaming: true,
+      replyTo: threadId, //Enviando o arquivo na thread
       progressCallback: (progress) => {
-        process.stdout.write(`\rUploaded: ${Math.round(progress * 100)}%`); // Atualiza a mesma linha
+        process.stdout.write(`\rUploaded: ${Math.round(progress * 100)}%`);
       },
     });
-    console.log(`\nFile ${filePath} uploaded successfully!`); // Nova linha após o upload
+    console.log(`\nFile ${filePath} uploaded successfully!`);
     fs.unlinkSync(filePath);
     return;
   } catch (error) {
@@ -94,14 +92,14 @@ async function uploadFile(filePath) {
 }
 
 app.post("/upload", async (req, res) => {
-  const { fileUrl } = req.body;
-  if (!fileUrl) {
-    return res.status(400).json({ error: "File URL and chat ID are required" });
+  const { fileUrl, chatId, threadId } = req.body; //Adicionado chatId e threadId
+  if (!fileUrl || !chatId || !threadId) { //Verifica se o chatId e threadId existem.
+    return res.status(400).json({ error: "File URL, chat ID, and thread ID are required" });
   }
   try {
     await startClient();
     const filePath = await downloadFile(fileUrl);
-    await uploadFile(path.join(__dirname, "upload", filePath));
+    await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId); //Envia o arquivo para o chatId e threadId
     res.status(200).json({ message: "File uploaded successfully!" });
   } catch (error) {
     console.error("Error:", error);
