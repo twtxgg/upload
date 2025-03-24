@@ -1,7 +1,7 @@
 const express = require("express");
 const fs = require("fs");
 const axios = require("axios");
-const { TelegramClient, Api } = require("telegram"); // Importe Api
+const { TelegramClient, Api } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const path = require("path");
 require("dotenv").config();
@@ -112,7 +112,7 @@ app.post("/upload", async (req, res) => {
   try {
     await startClient();
     const filePath = await downloadFile(fileUrl);
-    let targetChatId = chatId; // Inicialmente, usamos o chatId original
+    let targetChatId = chatId;
 
     const chat = await client.getEntity(chatId);
 
@@ -124,23 +124,33 @@ app.post("/upload", async (req, res) => {
           })
         );
         console.log("Informações completas do canal:", fullChannel);
-        // Verificar se fullChannel.chats contém o ID do canal correto.
-        // Garantir que o bot tenha permissões para enviar mensagens ao canal.
-        // Se o canal tiver um grupo vinculado, determinar se deve enviar ao canal ou ao grupo.
-        if (fullChannel && fullChannel.chats && fullChannel.chats.length > 0) {
-          const channelInfo = fullChannel.chats.find(c => c.id.value.toString() === chatId.toString());
-          if (channelInfo){
-            targetChatId = channelInfo.id;
+
+        // Verifique se o linkedChatId existe e se é diferente do chatId original
+        if (
+          fullChannel &&
+          fullChannel.fullChat &&
+          fullChannel.fullChat.linkedChatId &&
+          fullChannel.fullChat.linkedChatId.value.toString() !== chatId.toString()
+        ) {
+          // Se o linkedChatId existir, mas for diferente, use o chatId original
+          targetChatId = chatId;
+        } else {
+          // Caso contrário, verifique se o ID do canal está em 'chats'
+          if (fullChannel && fullChannel.chats && fullChannel.chats.length > 0) {
+            const channelInfo = fullChannel.chats.find(
+              (c) => c.id.value.toString() === chatId.toString()
+            );
+            if (channelInfo) {
+              targetChatId = channelInfo.id;
+            }
           }
-
         }
-
       } catch (channelError) {
         console.error("Erro ao obter informações do canal:", channelError);
       }
     }
 
-    await uploadFile(path.join(__dirname, "upload", filePath), targetChatId, threadId); // Usa targetChatId
+    await uploadFile(path.join(__dirname, "upload", filePath), targetChatId, threadId);
 
     res.status(200).json({ message: "Arquivo enviado com sucesso!" });
   } catch (error) {
