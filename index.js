@@ -69,17 +69,6 @@ async function uploadFile(filePath, chatId, threadId) {
     const chat = await client.getEntity(chatId);
     console.log("Informação do chat:", chat);
 
-    let messageOptions = {
-      message: `Enviando arquivo: ${fileName}`,
-    };
-
-    if (threadId) {
-      messageOptions.replyTo = threadId;
-    }
-
-    console.log("Enviando mensagem para chatId:", chatId);
-    await client.sendMessage(chatId, messageOptions);
-
     let fileOptions = {
       file: filePath,
       caption: fileName,
