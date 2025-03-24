@@ -92,14 +92,14 @@ async function uploadFile(filePath, chatId, threadId) { //Adicionado threadId
 }
 
 app.post("/upload", async (req, res) => {
-  const { fileUrl, threadId } = req.body; // chatid é fixo agora.
-  if (!fileUrl || !threadId) {
-    return res.status(400).json({ error: "File URL and thread ID are required" });
+  const { fileUrl, chatId, threadId } = req.body; //Adicionado chatId e threadId
+  if (!fileUrl || !chatId || !threadId) { //Verifica se o chatId e threadId existem.
+    return res.status(400).json({ error: "File URL, chat ID, and thread ID are required" });
   }
   try {
     await startClient();
     const filePath = await downloadFile(fileUrl);
-    await uploadFile(path.join(__dirname, "upload", filePath), -1002677165552, threadId); // chatid fixo aqui.
+    await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId); //Envia o arquivo para o chatId e threadId
     res.status(200).json({ message: "File uploaded successfully!" });
   } catch (error) {
     console.error("Error:", error);
