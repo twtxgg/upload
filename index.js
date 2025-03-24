@@ -135,16 +135,21 @@ app.post("/upload", async (req, res) => {
           }
         }
 
-        // Se não encontrarmos o ID do canal em 'chats', mas tivermos o linkedChatId,
-        // e o chatId original for igual ao linkedChatId, use o chatId original
+        // Se não encontrarmos o ID do canal em 'chats' e tivermos o linkedChatId,
+        // e o chatId original for igual ao linkedChatId, use o ID do canal
         else if (
           fullChannel &&
           fullChannel.fullChat &&
           fullChannel.fullChat.linkedChatId &&
           fullChannel.fullChat.linkedChatId.value.toString() === chatId.toString()
         ) {
-          targetChatId = chatId; // Use o chatId original (linkedChatId)
+          // Ajuste para o ID do canal
+          const channelInfo = fullChannel.chats.find(c => c.className === 'Channel');
+          if (channelInfo) {
+            targetChatId = channelInfo.id;
+          }
         }
+
       } catch (channelError) {
         console.error("Erro ao obter informações do canal:", channelError);
       }
