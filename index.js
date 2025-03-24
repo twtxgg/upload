@@ -7,9 +7,6 @@ const readlineSync = require("readline-sync");
 const path = require("path");
 require("dotenv").config();
 
-let fileName;
-let bot;
-const botUsername = "@uploadwgbot";
 const app = express();
 const port = process.env.PORT || 3000;
 app.use(express.json());
@@ -25,6 +22,8 @@ const client = new TelegramClient(stringSession, apiId, apiHash, {
   connectionRetries: 5,
 });
 
+let fileName; // Adicionado para escopo global
+
 async function startClient() {
   await client.start({
     phoneNumber: async () => phoneNumber,
@@ -33,7 +32,6 @@ async function startClient() {
       readlineSync.question("Enter the code you received: "),
     onError: (err) => console.error(err),
   });
-  bot = await client.getEntity(botUsername);
   console.log("Connected to Telegram");
   fs.writeFileSync(sessionFile, client.session.save());
 }
@@ -43,7 +41,7 @@ async function downloadFile(fileUrl) {
     const urlObj = new URL(fileUrl);
     const encodedFileName = urlObj.pathname;
     const decodedFileName = decodeURIComponent(encodedFileName);
-    fileName = path.basename(decodedFileName);
+    fileName = path.basename(decodedFileName); // Atribui a fileName aqui
 
     const writer = fs.createWriteStream(path.join(__dirname, "upload", fileName));
 
@@ -110,11 +108,12 @@ app.post("/upload", async (req, res) => {
   try {
     await startClient();
     const filePath = await downloadFile(fileUrl);
+    const chat = await client.getEntity(chatId);
 
-    if (threadId) {
+    if (chat.className === "User" || chat.className === "Chat") {
       await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
-    } else {
-      await uploadFile(path.join(__dirname, "upload", filePath), chatId);
+    } else if (chat.className === "Channel") {
+      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
     }
 
     res.status(200).json({ message: "File uploaded successfully!" });
