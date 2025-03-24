@@ -91,7 +91,10 @@ async function uploadFile(filePath, chatId, threadId) {
     }
 
     console.log("Enviando arquivo para chatId:", chatId);
-    await client.editMessage(chatId, sentMessage.id, { file: filePath, caption: fileName });
+    await client.sendFile(chatId, fileOptions);
+
+    // Opcional: deletar a mensagem inicial
+    await client.deleteMessages(chatId, [sentMessage.id]);
 
     console.log(`\nArquivo ${filePath} enviado com sucesso!`);
     fs.unlinkSync(filePath);
