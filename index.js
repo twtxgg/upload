@@ -12,7 +12,7 @@ app.use(express.json());
 
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE"; // Usando o token do bot fornecido
+const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE";
 
 const sessionFile = "session.txt";
 let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
@@ -51,33 +51,27 @@ async function downloadFile(fileUrl, chatId) {
     let downloadedLength = 0;
     let progressMessage;
 
+    // Envia mensagem de progresso inicial
+    progressMessage = await client.sendMessage(chatId, { message: "Download: 0%" });
+
     response.data.on("data", async (chunk) => {
       downloadedLength += chunk.length;
       const progress = (downloadedLength / totalLength) * 100;
-      console.log(`Download: ${progress.toFixed(2)}%`);
       try {
-        if (progressMessage && progressMessage.id) {
-          await client.editMessage(chatId, {
-            message: `Download: ${progress.toFixed(2)}%`,
-            id: progressMessage.id,
-          });
-        } else {
-          progressMessage = await client.sendMessage(chatId, {
-            message: `Download: ${progress.toFixed(2)}%`,
-          });
-        }
+        await client.editMessage(chatId, {
+          message: `Download: ${progress.toFixed(2)}%`,
+          id: progressMessage.id,
+        });
       } catch (error) {
-        console.error("Erro ao enviar/editar mensagem de progresso do download:", error);
+        console.error("Erro ao editar mensagem de progresso do download:", error);
       }
     });
 
     response.data.on("end", async () => {
-      if (progressMessage && progressMessage.id) {
-        try {
-          await client.deleteMessages(chatId, [progressMessage.id], { revoke: true });
-        } catch (error) {
-          console.error("Erro ao apagar mensagem de progresso do download:", error);
-        }
+      try {
+        await client.deleteMessages(chatId, [progressMessage.id], { revoke: true });
+      } catch (error) {
+        console.error("Erro ao apagar mensagem de progresso do download:", error);
       }
     });
 
@@ -122,18 +116,78 @@ async function uploadFile(filePath, chatId, threadId) {
 
     if (sentMessage && sentMessage.id) {
       let progressMessage;
+      progressMessage = await client.sendMessage(chatId, { message: "Upload: 0%" });
 
       let fileOptions = {
         file: filePath,
         caption: fileName,
         supportsStreaming: true,
         progressCallback: async (progress) => {
-          console.log(`Upload: ${(progress * 100).toFixed(2)}%`);
           try {
-            if (progressMessage && progressMessage.id) {
-              await client.editMessage(chatId, {
-                message: `Upload: ${(progress * 100).toFixed(2)}%`,
-                id: progressMessage.id,
-              });
-            } else {
-              progressMessage = await client.send
+            await client.editMessage(chatId, {
+              message: `Upload: ${(progress * 100).toFixed(2)}%`,
+              id: progressMessage.id,
+            });
+          } catch (error) {
+            console.error("Erro ao editar mensagem de progresso do upload:", error);
+          }
+        },
+      };
+
+      console.log("Enviando arquivo para chatId:", chatId);
+      await client.sendFile(chatId, fileOptions);
+
+      try {
+        await client.deleteMessages(chatId, [progressMessage.id], { revoke: true });
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await client.deleteMessages(chatId, [sentMessage.id], { revoke: true });
+      } catch (error) {
+        console.error("Erro ao apagar mensagens:", error);
+      }
+    } else {
+      console.error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
+      throw new Error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
+    }
+
+    console.log(`\nArquivo ${filePath} enviado com sucesso!`);
+    fs.unlinkSync(filePath);
+    return true;
+  } catch (error) {
+    console.error("Erro ao enviar arquivo:", error);
+    throw new Error("Falha ao enviar arquivo para o Telegram");
+    return false;
+  }
+}
+
+app.post("/upload", async (req, res) => {
+  const { fileUrl, chatId, threadId, messageId } = req.body;
+
+  if (!fileUrl || !chatId) {
+    return res.status(400).json({ error: "URL do arquivo e ID do chat são obrigatórios" });
+  }
+
+  try {
+    await startClient();
+    const filePath = await downloadFile(fileUrl, chatId);
+    const success = await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
+
+    if (success) {
+      try {
+        await client.deleteMessages(chatId, [messageId], { revoke: true });
+        res.status(200).json({ success: true });
+      } catch (deleteOriginalMessageError) {
+        console.error("Erro ao deletar mensagem original:", deleteOriginalMessageError);
+        res.status(500).json({ success: false, error: "Falha ao deletar mensagem original." });
+      }
+    } else {
+      res.status(500).json({ success: false, error: "Falha ao enviar arquivo." });
+    }
+  } catch (error) {
+    console.error("Erro:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Servidor rodando na porta ${port}`);
+});
