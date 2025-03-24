@@ -13,6 +13,7 @@ app.use(express.json());
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
 const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE";
+const idDoCanal = -1002525035590; // ID do canal
 
 const sessionFile = "session.txt";
 let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
@@ -117,9 +118,14 @@ app.post("/upload", async (req, res) => {
 
     console.log("Enviando para chatId:", targetChatId); // Log para verificar o chatId usado
 
-    await uploadFile(path.join(__dirname, "upload", filePath), targetChatId, threadId);
-
-    res.status(200).json({ message: "Arquivo enviado com sucesso!" });
+    // Verificar se a mensagem veio do canal ou grupo
+    if (targetChatId == idDoCanal) {
+      await uploadFile(path.join(__dirname, "upload", filePath), targetChatId, threadId);
+      res.status(200).json({ message: "Arquivo enviado com sucesso!" });
+    } else {
+      console.log("Mensagem do grupo vinculado, ignorando.");
+      res.status(200).json({ message: "Mensagem do grupo vinculado, ignorada." }); //envia resposta para o cliente mesmo ignorando.
+    }
   } catch (error) {
     console.error("Erro:", error);
     res.status(500).json({ error: error.message });
