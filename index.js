@@ -58,6 +58,7 @@ async function downloadFile(fileUrl, chatId) {
       downloadedLength += chunk.length;
       const progress = (downloadedLength / totalLength) * 100;
       try {
+        // Passa apenas a string da mensagem para editMessage
         await client.editMessage(chatId, {
           message: `Download: ${progress.toFixed(2)}%`,
           id: progressMessage.id,
@@ -124,6 +125,7 @@ async function uploadFile(filePath, chatId, threadId) {
         supportsStreaming: true,
         progressCallback: async (progress) => {
           try {
+            // Passa apenas a string da mensagem para editMessage
             await client.editMessage(chatId, {
               message: `Upload: ${(progress * 100).toFixed(2)}%`,
               id: progressMessage.id,
