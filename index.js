@@ -180,3 +180,32 @@ async function uploadFile(filePath, chatId, threadId) {
         }
       } catch (deleteMsgError) {
         console.error("Erro ao deletar mensagem inicial:", deleteMsgError);
+      }
+    } else {
+      console.error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
+      throw new Error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
+    }
+
+    console.log(`\nArquivo ${filePath} enviado com sucesso!`);
+    fs.unlinkSync(filePath);
+    return true;
+  } catch (error) {
+    console.error("Erro ao enviar arquivo:", error);
+    throw new Error("Falha ao enviar arquivo para o Telegram");
+    return false;
+  }
+}
+
+app.post("/upload", async (req, res) => {
+  const { fileUrl, chatId, threadId, messageId } = req.body;
+
+  if (!fileUrl || !chatId) {
+    return res.status(400).json({ error: "URL do arquivo e ID do chat são obrigatórios" });
+  }
+
+  try {
+    await startClient();
+    const filePath = await downloadFile(fileUrl, chatId);
+    const chat = await client.getEntity(chatId);
+
+    const success = await uploadFile(path.
