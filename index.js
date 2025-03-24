@@ -4,7 +4,7 @@ require("dotenv").config();
 
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const botToken = process.env.BOT_TOKEN; // Usando BOT_TOKEN do .env
+const botToken = process.env.BOT_TOKEN;
 
 const stringSession = new StringSession("");
 
@@ -15,7 +15,7 @@ const client = new TelegramClient(stringSession, apiId, apiHash, {
 async function run() {
   try {
     await client.start({ botAuthToken: botToken });
-    await client.sendMessage("YOUR_CHAT_ID", { // Substitua pelo ID do chat
+    await client.sendMessage(7824135861, { // Usando o ID fornecido
       message: "Teste de botão inline",
       buttons: new Api.ReplyInlineMarkup({
         rows: [
