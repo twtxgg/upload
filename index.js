@@ -80,21 +80,25 @@ async function uploadFile(filePath, chatId, threadId) {
     console.log("Enviando mensagem para chatId:", chatId);
     const sentMessage = await client.sendMessage(chatId, messageOptions);
 
-    let fileOptions = {
-      file: filePath,
-      caption: fileName,
-      supportsStreaming: true,
-    };
+    if (sentMessage && sentMessage.id) { // Verifica se a mensagem foi enviada com sucesso
+        let fileOptions = {
+            file: filePath,
+            caption: fileName,
+            supportsStreaming: true,
+        };
 
-    if (threadId) {
-      fileOptions.replyTo = threadId;
+        if (threadId) {
+            fileOptions.replyTo = threadId;
+        }
+
+        console.log("Enviando arquivo para chatId:", chatId);
+        await client.sendFile(chatId, fileOptions);
+
+        // Opcional: deletar a mensagem inicial
+        await client.deleteMessages(chatId, [sentMessage.id]);
+    } else {
+        console.error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
     }
-
-    console.log("Enviando arquivo para chatId:", chatId);
-    await client.sendFile(chatId, fileOptions);
-
-    // Opcional: deletar a mensagem inicial
-    await client.deleteMessages(chatId, [sentMessage.id]);
 
     console.log(`\nArquivo ${filePath} enviado com sucesso!`);
     fs.unlinkSync(filePath);
