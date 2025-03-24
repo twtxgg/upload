@@ -49,6 +49,7 @@ async function downloadFile(fileUrl, chatId) {
     const totalLength = response.headers["content-length"];
     let downloadedLength = 0;
     let progressMessage;
+    let lastProgress = 0;
 
     // Envia mensagem de progresso inicial
     progressMessage = await client.sendMessage(chatId, { message: "Download: 0%" });
@@ -56,18 +57,26 @@ async function downloadFile(fileUrl, chatId) {
     response.data.on("data", async (chunk) => {
       downloadedLength += chunk.length;
       const progress = (downloadedLength / totalLength) * 100;
-      try {
-        await client.editMessage(chatId, {
-          message: `Download: ${progress.toFixed(2)}%`,
-          id: progressMessage.id,
-        });
-      } catch (error) {
-        console.error("Erro ao editar mensagem de progresso do download:", error);
+
+      if (progress >= 50 && lastProgress < 50) {
+        try {
+          await client.editMessage(chatId, {
+            message: `Download: 50%`,
+            id: progressMessage.id,
+          });
+          lastProgress = 50;
+        } catch (error) {
+          console.error("Erro ao editar mensagem de progresso do download:", error);
+        }
       }
     });
 
     response.data.on("end", async () => {
       try {
+        await client.editMessage(chatId, {
+          message: `Download: 100%`,
+          id: progressMessage.id,
+        });
         await client.deleteMessages(chatId, [progressMessage.id], { revoke: true });
       } catch (error) {
         console.error("Erro ao apagar mensagem de progresso do download:", error);
@@ -112,6 +121,7 @@ async function uploadFile(filePath, chatId, threadId) {
 
     if (sentMessage && sentMessage.id) {
       let progressMessage;
+      let lastProgress = 0;
       progressMessage = await client.sendMessage(chatId, { message: "Upload: 0%" });
 
       let fileOptions = {
@@ -119,14 +129,17 @@ async function uploadFile(filePath, chatId, threadId) {
         caption: fileName,
         supportsStreaming: true,
         progressCallback: async (progress) => {
-          try {
-            // Passa apenas a string da mensagem para editMessage
-            await client.editMessage(chatId, {
-              message: `Upload: ${(progress * 100).toFixed(2)}%`,
-              id: progressMessage.id,
-            });
-          } catch (error) {
-            console.error("Erro ao editar mensagem de progresso do upload:", error);
+          const currentProgress = Math.floor(progress * 100);
+          if (currentProgress >= 50 && lastProgress < 50) {
+            try {
+              await client.editMessage(chatId, {
+                message: `Upload: 50%`,
+                id: progressMessage.id,
+              });
+              lastProgress = 50;
+            } catch (error) {
+              console.error("Erro ao editar mensagem de progresso do upload:", error);
+            }
           }
         },
       };
@@ -134,6 +147,10 @@ async function uploadFile(filePath, chatId, threadId) {
       await client.sendFile(chatId, fileOptions);
 
       try {
+        await client.editMessage(chatId, {
+          message: `Upload: 100%`,
+          id: progressMessage.id,
+        });
         await client.deleteMessages(chatId, [progressMessage.id], { revoke: true });
         await new Promise(resolve => setTimeout(resolve, 1000));
         await client.deleteMessages(chatId, [sentMessage.id], { revoke: true });
