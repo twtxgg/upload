@@ -115,6 +115,7 @@ app.post("/upload", async (req, res) => {
     let targetChatId = chatId;
 
     const chat = await client.getEntity(chatId);
+    console.log("Informações do chat (getEntity):", chat);
 
     if (chat.className === "Channel") {
       try {
@@ -132,6 +133,7 @@ app.post("/upload", async (req, res) => {
           );
           if (channelInfo) {
             targetChatId = channelInfo.id;
+            console.log("Usando ID do canal de fullChannel.chats:", targetChatId);
           }
         }
 
@@ -147,12 +149,22 @@ app.post("/upload", async (req, res) => {
           const channelInfo = fullChannel.chats.find(c => c.className === 'Channel');
           if (channelInfo) {
             targetChatId = channelInfo.id;
+            console.log("Usando ID do canal ajustado:", targetChatId);
+          } else {
+            console.log("Usando linkedChatId:", fullChannel.fullChat.linkedChatId.value);
+            targetChatId = fullChannel.fullChat.linkedChatId.value;
           }
+        } else {
+          console.log("Nenhuma lógica aplicada, usando chatId original:", chatId);
+          targetChatId = chatId;
         }
 
       } catch (channelError) {
         console.error("Erro ao obter informações do canal:", channelError);
       }
+    } else {
+      console.log("chat.className não é Channel, usando chatId original:", chatId);
+      targetChatId = chatId;
     }
 
     await uploadFile(path.join(__dirname, "upload", filePath), targetChatId, threadId);
