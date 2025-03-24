@@ -47,6 +47,15 @@ async function downloadFile(fileUrl) {
       responseType: "stream",
     });
 
+    const totalLength = response.headers["content-length"];
+    let downloadedLength = 0;
+
+    response.data.on("data", (chunk) => {
+      downloadedLength += chunk.length;
+      const progress = (downloadedLength / totalLength) * 100;
+      console.log(`Download: ${progress.toFixed(2)}%`);
+    });
+
     response.data.pipe(writer);
 
     return new Promise((resolve, reject) => {
@@ -91,6 +100,9 @@ async function uploadFile(filePath, chatId, threadId) {
         file: filePath,
         caption: fileName,
         supportsStreaming: true,
+        progressCallback: (progress) => {
+          console.log(`Upload: ${(progress * 100).toFixed(2)}%`);
+        },
       };
 
       if (threadId) {
@@ -141,17 +153,16 @@ app.post("/upload", async (req, res) => {
     const success = await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
 
     if (success) {
-        try {
-            await client.deleteMessages(chatId, [messageId], { revoke: true }); // Apaga a mensagem original
-            res.status(200).json({ success: true });
-        } catch (deleteOriginalMessageError) {
-            console.error("Erro ao deletar mensagem original:", deleteOriginalMessageError);
-            res.status(500).json({ success: false, error: "Falha ao deletar mensagem original." });
-        }
+      try {
+        await client.deleteMessages(chatId, [messageId], { revoke: true }); // Apaga a mensagem original
+        res.status(200).json({ success: true });
+      } catch (deleteOriginalMessageError) {
+        console.error("Erro ao deletar mensagem original:", deleteOriginalMessageError);
+        res.status(500).json({ success: false, error: "Falha ao deletar mensagem original." });
+      }
     } else {
-        res.status(500).json({ success: false, error: "Falha ao enviar arquivo." });
+      res.status(500).json({ success: false, error: "Falha ao enviar arquivo." });
     }
-
   } catch (error) {
     console.error("Erro:", error);
     res.status(500).json({ success: false, error: error.message });
