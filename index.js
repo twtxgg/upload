@@ -3,16 +3,20 @@ const fs = require("fs");
 const axios = require("axios");
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
+const readlineSync = require("readline-sync");
 const path = require("path");
 require("dotenv").config();
 
+let fileName;
+let bot;
+const botUsername = "@uploadwgbot";
 const app = express();
 const port = process.env.PORT || 3000;
 app.use(express.json());
 
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE"; // Usando el token del bot proporcionado
+const phoneNumber = process.env.PHONE_NUMBER;
 
 const sessionFile = "session.txt";
 let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
@@ -21,14 +25,16 @@ const client = new TelegramClient(stringSession, apiId, apiHash, {
   connectionRetries: 5,
 });
 
-let fileName;
-
 async function startClient() {
   await client.start({
-    botAuthToken: botToken, // Usando el token del bot
+    phoneNumber: async () => phoneNumber,
+    password: async () => "meuamor17",
+    phoneCode: async () =>
+      readlineSync.question("Enter the code you received: "),
     onError: (err) => console.error(err),
   });
-  console.log("Conectado al Telegram");
+  bot = await client.getEntity(botUsername);
+  console.log("Connected to Telegram");
   fs.writeFileSync(sessionFile, client.session.save());
 }
 
@@ -56,28 +62,21 @@ async function downloadFile(fileUrl) {
       });
     });
   } catch (err) {
-    console.error("Error durante la petición axios:", err.message);
+    console.error("Error during axios request:", err.message);
     throw err;
   }
 }
 
 async function uploadFile(filePath, chatId, threadId) {
   try {
-    const me = await client.getMe();
-    console.log("Información del bot:", me);
-
-    const chat = await client.getEntity(chatId);
-    console.log("Información del chat:", chat);
-
     let messageOptions = {
-      message: `Enviando archivo: ${fileName}`,
+      message: `Uploading file: ${fileName}`,
     };
 
     if (threadId) {
       messageOptions.replyTo = threadId;
     }
 
-    console.log("Enviando mensaje a chatId:", chatId);
     await client.sendMessage(chatId, messageOptions);
 
     let fileOptions = {
@@ -90,15 +89,14 @@ async function uploadFile(filePath, chatId, threadId) {
       fileOptions.replyTo = threadId;
     }
 
-    console.log("Enviando archivo a chatId:", chatId);
     await client.sendFile(chatId, fileOptions);
 
-    console.log(`\nArchivo ${filePath} enviado con éxito!`);
+    console.log(`\nFile ${filePath} uploaded successfully!`);
     fs.unlinkSync(filePath);
     return;
   } catch (error) {
-    console.error("Error al enviar archivo:", error);
-    throw new Error("Fallo al enviar archivo al Telegram");
+    console.error("Error uploading file:", error);
+    throw new Error("Failed to upload file to Telegram");
   }
 }
 
@@ -106,21 +104,20 @@ app.post("/upload", async (req, res) => {
   const { fileUrl, chatId, threadId } = req.body;
 
   if (!fileUrl || !chatId) {
-    return res.status(400).json({ error: "URL del archivo e ID del chat son obligatorios" });
+    return res.status(400).json({ error: "File URL and chat ID are required" });
   }
 
   try {
     await startClient();
     const filePath = await downloadFile(fileUrl);
-    const chat = await client.getEntity(chatId);
 
-    if (chat.className === "User" || chat.className === "Chat") {
+    if (threadId) {
       await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
-    } else if (chat.className === "Channel") {
-      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
+    } else {
+      await uploadFile(path.join(__dirname, "upload", filePath), chatId);
     }
 
-    res.status(200).json({ message: "Archivo enviado con éxito!" });
+    res.status(200).json({ message: "File uploaded successfully!" });
   } catch (error) {
     console.error("Error:", error);
     res.status(500).json({ error: error.message });
@@ -128,5 +125,5 @@ app.post("/upload", async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`Servidor corriendo en el puerto ${port}`);
+  console.log(`Server running on port ${port}`);
 });
