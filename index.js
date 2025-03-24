@@ -2,7 +2,6 @@ const express = require("express");
 const fs = require("fs");
 const axios = require("axios");
 const { TelegramClient, Api } = require("telegram");
-const { ReplyInlineMarkup, KeyboardButtonCallback } = require("telegram/tl/types"); // Importação direta
 const { StringSession } = require("telegram/sessions");
 const readlineSync = require("readline-sync");
 const path = require("path");
@@ -70,10 +69,10 @@ async function uploadFile(filePath, chatId, threadId) {
   try {
     let messageOptions = {
       message: `Uploading file: ${fileName}`,
-      buttons: new ReplyInlineMarkup({
+      buttons: new Api.ReplyInlineMarkup({ // Correção: Usando Api.ReplyInlineMarkup
         rows: [
           [
-            new KeyboardButtonCallback({
+            new Api.KeyboardButtonCallback({ // Correção: Usando Api.KeyboardButtonCallback
               text: "Clique aqui para teste",
               data: "test_button",
             }),
@@ -133,7 +132,6 @@ app.post("/upload", async (req, res) => {
   }
 });
 
-// Servir o arquivo HTML
 app.get("/test", (req, res) => {
   res.sendFile(path.join(__dirname, "test.html"));
 });
