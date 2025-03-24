@@ -80,34 +80,38 @@ async function uploadFile(filePath, chatId, threadId) {
     console.log("Enviando mensagem para chatId:", chatId);
     let sentMessage;
     try {
-        sentMessage = await client.sendMessage(chatId, messageOptions);
+      sentMessage = await client.sendMessage(chatId, messageOptions);
     } catch (sendMsgError) {
-        console.error("Erro ao enviar mensagem inicial:", sendMsgError);
-        throw new Error("Falha ao enviar mensagem inicial.");
+      console.error("Erro ao enviar mensagem inicial:", sendMsgError);
+      throw new Error("Falha ao enviar mensagem inicial.");
     }
 
     if (sentMessage && sentMessage.id) {
-        let fileOptions = {
-            file: filePath,
-            caption: fileName,
-            supportsStreaming: true,
-        };
+      let fileOptions = {
+        file: filePath,
+        caption: fileName,
+        supportsStreaming: true,
+      };
 
-        if (threadId) {
-            fileOptions.replyTo = threadId;
-        }
+      if (threadId) {
+        fileOptions.replyTo = threadId;
+      }
 
-        console.log("Enviando arquivo para chatId:", chatId);
-        await client.sendFile(chatId, fileOptions);
+      console.log("Enviando arquivo para chatId:", chatId);
+      await client.sendFile(chatId, fileOptions);
 
-        try {
+      try {
+        if (sentMessage && sentMessage.id) {
             await client.deleteMessages(chatId, [sentMessage.id]);
-        } catch (deleteMsgError) {
-            console.error("Erro ao deletar mensagem inicial:", deleteMsgError);
+        } else {
+            console.error("sentMessage ou sentMessage.id não definidos ao deletar.");
         }
+      } catch (deleteMsgError) {
+        console.error("Erro ao deletar mensagem inicial:", deleteMsgError);
+      }
     } else {
-        console.error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
-        throw new Error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
+      console.error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
+      throw new Error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
     }
 
     console.log(`\nArquivo ${filePath} enviado com sucesso!`);
