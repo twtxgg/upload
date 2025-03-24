@@ -58,7 +58,6 @@ async function downloadFile(fileUrl, chatId) {
       downloadedLength += chunk.length;
       const progress = (downloadedLength / totalLength) * 100;
       try {
-        // Passa apenas a string da mensagem para editMessage
         await client.editMessage(chatId, {
           message: `Download: ${progress.toFixed(2)}%`,
           id: progressMessage.id,
