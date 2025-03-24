@@ -7,6 +7,9 @@ const readlineSync = require("readline-sync");
 const path = require("path");
 require("dotenv").config();
 
+let fileName;
+let bot;
+const botUsername = "@uploadwgbot";
 const app = express();
 const port = process.env.PORT || 3000;
 app.use(express.json());
@@ -22,8 +25,6 @@ const client = new TelegramClient(stringSession, apiId, apiHash, {
   connectionRetries: 5,
 });
 
-let fileName; // Adicionado para escopo global
-
 async function startClient() {
   await client.start({
     phoneNumber: async () => phoneNumber,
@@ -32,6 +33,7 @@ async function startClient() {
       readlineSync.question("Enter the code you received: "),
     onError: (err) => console.error(err),
   });
+  bot = await client.getEntity(botUsername);
   console.log("Connected to Telegram");
   fs.writeFileSync(sessionFile, client.session.save());
 }
@@ -41,7 +43,7 @@ async function downloadFile(fileUrl) {
     const urlObj = new URL(fileUrl);
     const encodedFileName = urlObj.pathname;
     const decodedFileName = decodeURIComponent(encodedFileName);
-    fileName = path.basename(decodedFileName); // Atribui a fileName aqui
+    fileName = path.basename(decodedFileName);
 
     const writer = fs.createWriteStream(path.join(__dirname, "upload", fileName));
 
@@ -65,30 +67,21 @@ async function downloadFile(fileUrl) {
   }
 }
 
-async function uploadFile(filePath, chatId, threadId) {
+async function uploadFile(filePath, chatId, threadId) { //Adicionado threadId
   try {
-    let messageOptions = {
+    await client.sendMessage(chatId, {
       message: `Uploading file: ${fileName}`,
-    };
-
-    if (threadId) {
-      messageOptions.replyTo = threadId;
-    }
-
-    await client.sendMessage(chatId, messageOptions);
-
-    let fileOptions = {
+      replyTo: threadId, //Enviando a mensagem na thread
+    });
+    await client.sendFile(chatId, {
       file: filePath,
       caption: fileName,
       supportsStreaming: true,
-    };
-
-    if (threadId) {
-      fileOptions.replyTo = threadId;
-    }
-
-    await client.sendFile(chatId, fileOptions);
-
+      replyTo: threadId, //Enviando o arquivo na thread
+      progressCallback: (progress) => {
+        process.stdout.write(`\rUploaded: ${Math.round(progress * 100)}%`);
+      },
+    });
     console.log(`\nFile ${filePath} uploaded successfully!`);
     fs.unlinkSync(filePath);
     return;
@@ -99,23 +92,14 @@ async function uploadFile(filePath, chatId, threadId) {
 }
 
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, threadId } = req.body;
-
-  if (!fileUrl || !chatId) {
-    return res.status(400).json({ error: "File URL and chat ID are required" });
+  const { fileUrl, chatId, threadId } = req.body; //Adicionado chatId e threadId
+  if (!fileUrl || !chatId || !threadId) { //Verifica se o chatId e threadId existem.
+    return res.status(400).json({ error: "File URL, chat ID, and thread ID are required" });
   }
-
   try {
     await startClient();
     const filePath = await downloadFile(fileUrl);
-    const chat = await client.getEntity(chatId);
-
-    if (chat.className === "User" || chat.className === "Chat") {
-      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
-    } else if (chat.className === "Channel") {
-      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
-    }
-
+    await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId); //Envia o arquivo para o chatId e threadId
     res.status(200).json({ message: "File uploaded successfully!" });
   } catch (error) {
     console.error("Error:", error);
