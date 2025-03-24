@@ -32,7 +32,7 @@ async function startClient() {
   fs.writeFileSync(sessionFile, client.session.save());
 }
 
-async function downloadFile(fileUrl) {
+async function downloadFile(fileUrl, chatId) {
   try {
     const urlObj = new URL(fileUrl);
     const encodedFileName = urlObj.pathname;
@@ -50,16 +50,15 @@ async function downloadFile(fileUrl) {
     const totalLength = response.headers["content-length"];
     let downloadedLength = 0;
 
-    response.data.on("data", (chunk) => {
+    response.data.on("data", async (chunk) => {
       downloadedLength += chunk.length;
       const progress = (downloadedLength / totalLength) * 100;
-      process.stdout.clearLine(0); // Limpa a linha atual
-      process.stdout.cursorTo(0); // Move o cursor para o início da linha
-      process.stdout.write(`Download: ${progress.toFixed(2)}%`); // Escreve a porcentagem
-    });
-
-    response.data.on("end", () => {
-      process.stdout.write("\n"); // Adiciona uma nova linha após o download
+      console.log(`Download: ${progress.toFixed(2)}%`);
+      try {
+        await client.sendMessage(chatId, { message: `Download: ${progress.toFixed(2)}%` });
+      } catch (error) {
+        console.error("Erro ao enviar mensagem de progresso do download:", error);
+      }
     });
 
     response.data.pipe(writer);
@@ -102,21 +101,46 @@ async function uploadFile(filePath, chatId, threadId) {
     }
 
     if (sentMessage && sentMessage.id) {
+      let progressMessage; // Mensagem de progresso do upload
+
       let fileOptions = {
         file: filePath,
         caption: fileName,
         supportsStreaming: true,
-        progressCallback: (progress) => {
-          process.stdout.clearLine(0); // Limpa a linha atual
-          process.stdout.cursorTo(0); // Move o cursor para o início da linha
-          process.stdout.write(`Upload: ${(progress * 100).toFixed(2)}%`); // Escreve a porcentagem
+        progressCallback: async (progress) => {
+          console.log(`Upload: ${(progress * 100).toFixed(2)}%`);
+          try {
+            if (progressMessage && progressMessage.id) {
+              await client.editMessage(chatId, {
+                message: `Upload: ${(progress * 100).toFixed(2)}%`,
+                id: progressMessage.id,
+              });
+            } else {
+              progressMessage = await client.sendMessage(chatId, {
+                message: `Upload: ${(progress * 100).toFixed(2)}%`,
+              });
+            }
+          } catch (error) {
+            console.error("Erro ao enviar/editar mensagem de progresso do upload:", error);
+          }
         },
       };
+
+      if (threadId) {
+        fileOptions.replyTo = threadId;
+      }
 
       console.log("Enviando arquivo para chatId:", chatId);
       await client.sendFile(chatId, fileOptions);
 
-      process.stdout.write("\n"); // Adiciona uma nova linha após o upload
+      // Apaga a mensagem de progresso do upload após a conclusão
+      if (progressMessage && progressMessage.id) {
+        try {
+          await client.deleteMessages(chatId, [progressMessage.id], { revoke: true });
+        } catch (error) {
+          console.error("Erro ao apagar mensagem de progresso do upload:", error);
+        }
+      }
 
       try {
         if (sentMessage && sentMessage.id) {
@@ -153,7 +177,7 @@ app.post("/upload", async (req, res) => {
 
   try {
     await startClient();
-    const filePath = await downloadFile(fileUrl);
+    const filePath = await downloadFile(fileUrl, chatId); // Passa chatId para downloadFile
     const chat = await client.getEntity(chatId);
 
     const success = await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
