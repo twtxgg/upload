@@ -125,25 +125,25 @@ app.post("/upload", async (req, res) => {
         );
         console.log("Informações completas do canal:", fullChannel);
 
-        // Verifique se o linkedChatId existe e se é diferente do chatId original
-        if (
+        // Priorize o ID do canal se disponível
+        if (fullChannel && fullChannel.chats && fullChannel.chats.length > 0) {
+          const channelInfo = fullChannel.chats.find(
+            (c) => c.id.value.toString() === chatId.toString()
+          );
+          if (channelInfo) {
+            targetChatId = channelInfo.id;
+          }
+        }
+
+        // Se não encontrarmos o ID do canal em 'chats', mas tivermos o linkedChatId,
+        // e o chatId original for igual ao linkedChatId, use o chatId original
+        else if (
           fullChannel &&
           fullChannel.fullChat &&
           fullChannel.fullChat.linkedChatId &&
-          fullChannel.fullChat.linkedChatId.value.toString() !== chatId.toString()
+          fullChannel.fullChat.linkedChatId.value.toString() === chatId.toString()
         ) {
-          // Se o linkedChatId existir, mas for diferente, use o chatId original
-          targetChatId = chatId;
-        } else {
-          // Caso contrário, verifique se o ID do canal está em 'chats'
-          if (fullChannel && fullChannel.chats && fullChannel.chats.length > 0) {
-            const channelInfo = fullChannel.chats.find(
-              (c) => c.id.value.toString() === chatId.toString()
-            );
-            if (channelInfo) {
-              targetChatId = channelInfo.id;
-            }
-          }
+          targetChatId = chatId; // Use o chatId original (linkedChatId)
         }
       } catch (channelError) {
         console.error("Erro ao obter informações do canal:", channelError);
