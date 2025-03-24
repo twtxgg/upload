@@ -63,39 +63,40 @@ async function downloadFile(fileUrl) {
 
 async function uploadFile(filePath, chatId, threadId) {
   try {
+    console.log("Iniciando upload do arquivo:", filePath);
     const me = await client.getMe();
     console.log("Informações do bot:", me);
-
     const chat = await client.getEntity(chatId);
     console.log("Informações do chat:", chat);
-
     let messageOptions = {
       message: `Enviando arquivo: ${fileName}`,
     };
-
     if (threadId) {
       messageOptions.replyTo = threadId;
     }
-
     console.log("Enviando mensagem para chatId:", chatId);
     await client.sendMessage(chatId, messageOptions);
-
+    console.log("Mensagem de envio enviada.");
     let fileOptions = {
       file: filePath,
       caption: fileName,
       supportsStreaming: true,
     };
-
     if (threadId) {
       fileOptions.replyTo = threadId;
     }
-
     console.log("Enviando arquivo para chatId:", chatId);
-    await client.sendFile(chatId, fileOptions);
-
-    console.log(`\nArquivo ${filePath} enviado com sucesso!`);
-    fs.unlinkSync(filePath);
-    return;
+    if (fs.existsSync(filePath)) {
+      console.log("Arquivo encontrado:", filePath);
+      await client.sendFile(chatId, fileOptions);
+      console.log("Arquivo enviado com sucesso!");
+      fs.unlinkSync(filePath);
+      console.log("Arquivo local deletado.");
+      return;
+    } else {
+      console.error("Arquivo não encontrado:", filePath);
+      throw new Error("Arquivo não encontrado no servidor.");
+    }
   } catch (error) {
     console.error("Erro ao enviar arquivo:", error);
     throw new Error("Falha ao enviar arquivo para o Telegram");
