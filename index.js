@@ -25,7 +25,7 @@ let fileName;
 
 async function startClient() {
   await client.start({
-    botAuthToken: botToken, // Usando o token do bot
+    botAuthToken: botToken,
     onError: (err) => console.error(err),
   });
   console.log("Conectado ao Telegram");
@@ -136,76 +136,4 @@ async function uploadFile(filePath, chatId, threadId) {
                 id: progressMessage.id,
               });
             } else {
-              progressMessage = await client.sendMessage(chatId, {
-                message: `Upload: ${(progress * 100).toFixed(2)}%`,
-              });
-            }
-          } catch (error) {
-            console.error("Erro ao enviar/editar mensagem de progresso do upload:", error);
-          }
-        },
-      };
-
-      if (threadId) {
-        fileOptions.replyTo = threadId;
-      }
-
-      console.log("Enviando arquivo para chatId:", chatId);
-      try {
-        await client.sendFile(chatId, fileOptions);
-      } catch (uploadError) {
-        console.error("Erro ao enviar arquivo para o Telegram:", uploadError);
-        if (uploadError.message.includes("error code: 521")) {
-          console.error("Servidor do Telegram está indisponível (código de erro 521).");
-          throw new Error("Servidor do Telegram está indisponível.");
-        } else {
-          throw new Error("Falha ao enviar arquivo para o Telegram.");
-        }
-      }
-
-      if (progressMessage && progressMessage.id) {
-        try {
-          await client.deleteMessages(chatId, [progressMessage.id], { revoke: true });
-        } catch (error) {
-          console.error("Erro ao apagar mensagem de progresso do upload:", error);
-        }
-      }
-
-      try {
-        if (sentMessage && sentMessage.id) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          await client.deleteMessages(chatId, [sentMessage.id], { revoke: true });
-        } else {
-          console.error("sentMessage ou sentMessage.id não definidos ao deletar.");
-        }
-      } catch (deleteMsgError) {
-        console.error("Erro ao deletar mensagem inicial:", deleteMsgError);
-      }
-    } else {
-      console.error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
-      throw new Error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
-    }
-
-    console.log(`\nArquivo ${filePath} enviado com sucesso!`);
-    fs.unlinkSync(filePath);
-    return true;
-  } catch (error) {
-    console.error("Erro ao enviar arquivo:", error);
-    throw new Error("Falha ao enviar arquivo para o Telegram");
-    return false;
-  }
-}
-
-app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, threadId, messageId } = req.body;
-
-  if (!fileUrl || !chatId) {
-    return res.status(400).json({ error: "URL do arquivo e ID do chat são obrigatórios" });
-  }
-
-  try {
-    await startClient();
-    const filePath = await downloadFile(fileUrl, chatId);
-    const chat = await client.getEntity(chatId);
-
-    const success = await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
+              progressMessage = await client.send
