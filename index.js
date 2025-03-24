@@ -78,9 +78,15 @@ async function uploadFile(filePath, chatId, threadId) {
     }
 
     console.log("Enviando mensagem para chatId:", chatId);
-    const sentMessage = await client.sendMessage(chatId, messageOptions);
+    let sentMessage;
+    try {
+        sentMessage = await client.sendMessage(chatId, messageOptions);
+    } catch (sendMsgError) {
+        console.error("Erro ao enviar mensagem inicial:", sendMsgError);
+        throw new Error("Falha ao enviar mensagem inicial.");
+    }
 
-    if (sentMessage && sentMessage.id) { // Verifica se a mensagem foi enviada com sucesso
+    if (sentMessage && sentMessage.id) {
         let fileOptions = {
             file: filePath,
             caption: fileName,
@@ -94,10 +100,14 @@ async function uploadFile(filePath, chatId, threadId) {
         console.log("Enviando arquivo para chatId:", chatId);
         await client.sendFile(chatId, fileOptions);
 
-        // Opcional: deletar a mensagem inicial
-        await client.deleteMessages(chatId, [sentMessage.id]);
+        try {
+            await client.deleteMessages(chatId, [sentMessage.id]);
+        } catch (deleteMsgError) {
+            console.error("Erro ao deletar mensagem inicial:", deleteMsgError);
+        }
     } else {
         console.error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
+        throw new Error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
     }
 
     console.log(`\nArquivo ${filePath} enviado com sucesso!`);
