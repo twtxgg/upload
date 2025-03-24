@@ -208,4 +208,6 @@ app.post("/upload", async (req, res) => {
     const filePath = await downloadFile(fileUrl, chatId);
     const chat = await client.getEntity(chatId);
 
-    const success = await uploadFile(path.
+    const success = await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
+
+    if
