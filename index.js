@@ -28,7 +28,6 @@ async function startClient() {
     botAuthToken: botToken,
     onError: (err) => console.error(err),
   });
-  console.log("Conectado ao Telegram");
   fs.writeFileSync(sessionFile, client.session.save());
 }
 
@@ -92,10 +91,8 @@ async function downloadFile(fileUrl, chatId) {
 async function uploadFile(filePath, chatId, threadId) {
   try {
     const me = await client.getMe();
-    console.log("Informação do bot:", me);
 
     const chat = await client.getEntity(chatId);
-    console.log("Informação do chat:", chat);
 
     let messageOptions = {
       message: `Enviando arquivo: ${fileName}`,
@@ -105,7 +102,6 @@ async function uploadFile(filePath, chatId, threadId) {
       messageOptions.replyTo = threadId;
     }
 
-    console.log("Enviando mensagem para chatId:", chatId);
     let sentMessage;
     try {
       sentMessage = await client.sendMessage(chatId, messageOptions);
@@ -135,7 +131,6 @@ async function uploadFile(filePath, chatId, threadId) {
         },
       };
 
-      console.log("Enviando arquivo para chatId:", chatId);
       await client.sendFile(chatId, fileOptions);
 
       try {
@@ -150,7 +145,6 @@ async function uploadFile(filePath, chatId, threadId) {
       throw new Error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
     }
 
-    console.log(`\nArquivo ${filePath} enviado com sucesso!`);
     fs.unlinkSync(filePath);
     return true;
   } catch (error) {
