@@ -47,10 +47,6 @@ async function downloadFile(fileUrl) {
 
     const writer = fs.createWriteStream(path.join(__dirname, "upload", fileName));
 
-    await client.sendMessage(bot, {
-      message: `Downloading file: ${fileName}`,
-    });
-
     const response = await axios({
       method: "get",
       url: fileUrl,
@@ -71,12 +67,12 @@ async function downloadFile(fileUrl) {
   }
 }
 
-async function uploadFile(filePath, chatId) { //Adicionado chatId como parâmetro
+async function uploadFile(filePath, chatId) { //Adicionado chatId
   try {
-    await client.sendMessage(bot, {
+    await client.sendMessage(chatId, { //Usando chatId
       message: `Uploading file: ${fileName}`,
     });
-    await client.sendFile(chatId, { //Usando o chatId aqui
+    await client.sendFile(chatId, { //Usando chatId
       file: filePath,
       caption: fileName,
       supportsStreaming: true,
@@ -84,7 +80,7 @@ async function uploadFile(filePath, chatId) { //Adicionado chatId como parâmetr
         process.stdout.write(`\rUploaded: ${Math.round(progress * 100)}%`);
       },
     });
-    console.log(`\nFile ${filePath} uploaded successfully to chat ${chatId}!`);
+    console.log(`\nFile ${filePath} uploaded successfully!`);
     fs.unlinkSync(filePath);
     return;
   } catch (error) {
@@ -94,14 +90,14 @@ async function uploadFile(filePath, chatId) { //Adicionado chatId como parâmetr
 }
 
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId } = req.body; //Adicionado chatId do body da requisição
-  if (!fileUrl || !chatId) {
+  const { fileUrl, chatId } = req.body; //Adicionado chatId
+  if (!fileUrl || !chatId) { //Adicionado chatId verificação
     return res.status(400).json({ error: "File URL and chat ID are required" });
   }
   try {
     await startClient();
     const filePath = await downloadFile(fileUrl);
-    await uploadFile(path.join(__dirname, "upload", filePath), chatId); //Passando chatId
+    await uploadFile(path.join(__dirname, "upload", filePath), chatId); //Adicionado chatId
     res.status(200).json({ message: "File uploaded successfully!" });
   } catch (error) {
     console.error("Error:", error);
