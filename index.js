@@ -61,7 +61,7 @@ async function downloadFile(fileUrl) {
   }
 }
 
-async function uploadFile(filePath, chatId, threadId) {
+async function uploadFile(filePath, chatId, threadId, initialMessageId) {
   try {
     const me = await client.getMe();
     console.log("Informação do bot:", me);
@@ -69,51 +69,26 @@ async function uploadFile(filePath, chatId, threadId) {
     const chat = await client.getEntity(chatId);
     console.log("Informação do chat:", chat);
 
-    let messageOptions = {
-      message: `Enviando arquivo: ${fileName}`,
+    let fileOptions = {
+      file: filePath,
+      caption: fileName,
+      supportsStreaming: true,
     };
 
     if (threadId) {
-      messageOptions.replyTo = threadId;
+      fileOptions.replyTo = threadId;
     }
 
-    console.log("Enviando mensagem para chatId:", chatId);
-    let sentMessage;
-    try {
-      sentMessage = await client.sendMessage(chatId, messageOptions);
-    } catch (sendMsgError) {
-      console.error("Erro ao enviar mensagem inicial:", sendMsgError);
-      throw new Error("Falha ao enviar mensagem inicial.");
-    }
+    console.log("Enviando arquivo para chatId:", chatId);
+    await client.sendFile(chatId, fileOptions);
 
-    if (sentMessage && sentMessage.id) {
-      let fileOptions = {
-        file: filePath,
-        caption: fileName,
-        supportsStreaming: true,
-      };
-
-      if (threadId) {
-        fileOptions.replyTo = threadId;
-      }
-
-      console.log("Enviando arquivo para chatId:", chatId);
-      await client.sendFile(chatId, fileOptions);
-
+    // Deleta a mensagem inicial que continha a URL
+    if (initialMessageId) {
       try {
-        if (sentMessage && sentMessage.id) {
-            // Adiciona um atraso antes de deletar a mensagem
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            await client.deleteMessages(chatId, [sentMessage.id], { revoke: true });
-        } else {
-            console.error("sentMessage ou sentMessage.id não definidos ao deletar.");
-        }
+        await client.deleteMessages(chatId, [initialMessageId], { revoke: true });
       } catch (deleteMsgError) {
         console.error("Erro ao deletar mensagem inicial:", deleteMsgError);
       }
-    } else {
-      console.error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
-      throw new Error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
     }
 
     console.log(`\nArquivo ${filePath} enviado com sucesso!`);
@@ -137,10 +112,13 @@ app.post("/upload", async (req, res) => {
     const filePath = await downloadFile(fileUrl);
     const chat = await client.getEntity(chatId);
 
+    // Envia a mensagem inicial com a URL
+    const initialMessage = await client.sendMessage(chatId, { message: fileUrl });
+
     if (chat.className === "User" || chat.className === "Chat") {
-      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
+      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId, initialMessage.id);
     } else if (chat.className === "Channel") {
-      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
+      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId, initialMessage.id);
     }
 
     res.status(200).json({ message: "Arquivo enviado com sucesso!" });
