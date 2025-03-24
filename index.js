@@ -10,18 +10,6 @@ bot.on('polling_error', (error) => {
     console.error('Erro de polling:', error);
 });
 
-bot.on('callback_query', (callbackQuery) => {
-    const data = callbackQuery.data;
-    const msg = callbackQuery.message;
-    const chatId = msg.chat.id;
-
-    if (data === 'teste') {
-        bot.sendMessage(chatId, 'Botão clicado!');
-    }
-
-    bot.answerCallbackQuery(callbackQuery.id);
-});
-
 bot.sendMessage(chatId, 'Teste de botão inline', {
     reply_markup: {
         inline_keyboard: [[{ text: 'Clique aqui', callback_data: 'teste' }]]
