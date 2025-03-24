@@ -1,38 +1,33 @@
-const { TelegramClient, Api } = require("telegram");
-const { StringSession } = require("telegram/sessions");
-require("dotenv").config();
+const TelegramBot = require('node-telegram-bot-api');
+require('dotenv').config();
 
-const apiId = Number(process.env.API_ID);
-const apiHash = process.env.API_HASH;
 const botToken = process.env.BOT_TOKEN;
+const chatId = 7824135861; // ID do chat
 
-const stringSession = new StringSession("");
+const bot = new TelegramBot(botToken, { polling: true });
 
-const client = new TelegramClient(stringSession, apiId, apiHash, {
-  connectionRetries: 5,
+bot.on('polling_error', (error) => {
+    console.error('Erro de polling:', error);
 });
 
-async function run() {
-  try {
-    await client.start({ botAuthToken: botToken });
-    await client.sendMessage(7824135861, { // Usando o ID fornecido
-      message: "Teste de botão inline",
-      buttons: new Api.ReplyInlineMarkup({
-        rows: [
-          [
-            new Api.KeyboardButtonCallback({
-              text: "Clique aqui",
-              data: "teste",
-            }),
-          ],
-        ],
-      }),
-    });
-    console.log("Mensagem com botão inline enviada!");
-    await client.disconnect();
-  } catch (error) {
-    console.error("Erro ao enviar mensagem:", error);
-  }
-}
+bot.on('callback_query', (callbackQuery) => {
+    const data = callbackQuery.data;
+    const msg = callbackQuery.message;
+    const chatId = msg.chat.id;
 
-run();
+    if (data === 'teste') {
+        bot.sendMessage(chatId, 'Botão clicado!');
+    }
+
+    bot.answerCallbackQuery(callbackQuery.id);
+});
+
+bot.sendMessage(chatId, 'Teste de botão inline', {
+    reply_markup: {
+        inline_keyboard: [[{ text: 'Clique aqui', callback_data: 'teste' }]]
+    }
+}).then(() => {
+    console.log('Mensagem com botão inline enviada!');
+}).catch((error) => {
+    console.error('Erro ao enviar mensagem:', error);
+});
