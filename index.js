@@ -55,9 +55,7 @@ async function downloadFile(fileUrl) {
 
     return new Promise((resolve, reject) => {
       writer.on("finish", () => resolve(fileName));
-      writer.on("error", (err) => {
-        reject(err);
-      });
+      writer.on("error", (err) => reject(err));
     });
   } catch (err) {
     console.error("Error during axios request:", err.message);
@@ -65,7 +63,7 @@ async function downloadFile(fileUrl) {
   }
 }
 
-async function downloadTelegramFile(file, chatId) {
+async function downloadTelegramFile(file) {
   try {
     fileName = file.name;
     const filePath = path.join(__dirname, "upload", fileName);
@@ -84,31 +82,24 @@ async function downloadTelegramFile(file, chatId) {
 
 async function uploadFile(filePath, chatId, threadId) {
   try {
-    let messageOptions = {
+    const messageOptions = {
       message: `Uploading file: ${fileName}`,
+      replyTo: threadId,
     };
-
-    if (threadId) {
-      messageOptions.replyTo = threadId;
-    }
 
     await client.sendMessage(chatId, messageOptions);
 
-    let fileOptions = {
+    const fileOptions = {
       file: filePath,
       caption: fileName,
       supportsStreaming: true,
+      replyTo: threadId,
     };
-
-    if (threadId) {
-      fileOptions.replyTo = threadId;
-    }
 
     await client.sendFile(chatId, fileOptions);
 
     console.log(`\nFile ${filePath} uploaded successfully!`);
     fs.unlinkSync(filePath);
-    return;
   } catch (error) {
     console.error("Error uploading file:", error);
     throw new Error("Failed to upload file to Telegram");
@@ -129,8 +120,8 @@ app.post("/upload", async (req, res) => {
 
     if (messageId) {
       const message = await client.getMessageById(chatId, messageId);
-      if (message && message.media) {
-        filePath = await downloadTelegramFile(message.media, chatId);
+      if (message?.media) {
+        filePath = await downloadTelegramFile(message.media);
       } else if (fileUrl) {
         filePath = await downloadFile(fileUrl);
       } else {
