@@ -12,7 +12,7 @@ app.use(express.json());
 
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE"; // Usando o token do bot fornecido
+const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE";
 
 const sessionFile = "session.txt";
 let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
@@ -25,7 +25,7 @@ let fileName;
 
 async function startClient() {
   await client.start({
-    botAuthToken: botToken, // Usando o token do bot
+    botAuthToken: botToken,
     onError: (err) => console.error(err),
   });
   console.log("Conectado ao Telegram");
@@ -52,14 +52,14 @@ async function downloadFile(fileUrl) {
 
     response.data.on("data", (chunk) => {
       downloadedLength += chunk.length;
-      const progress = (downloadedLength / totalLength) * 100;
-      process.stdout.clearLine(0); // Limpa a linha atual
-      process.stdout.cursorTo(0); // Move o cursor para o início da linha
-      process.stdout.write(`Download: ${progress.toFixed(2)}%`); // Escreve a porcentagem
+      const progress = Math.round((downloadedLength / totalLength) * 100); // Arredonda para inteiro
+      process.stdout.clearLine(0);
+      process.stdout.cursorTo(0);
+      process.stdout.write(`Download: ${progress}%`); // Escreve a porcentagem inteira
     });
 
     response.data.on("end", () => {
-      process.stdout.write("\n"); // Adiciona uma nova linha após o download
+      process.stdout.write("\n");
     });
 
     response.data.pipe(writer);
@@ -107,20 +107,19 @@ async function uploadFile(filePath, chatId, threadId) {
         caption: fileName,
         supportsStreaming: true,
         progressCallback: (progress) => {
-          process.stdout.clearLine(0); // Limpa a linha atual
-          process.stdout.cursorTo(0); // Move o cursor para o início da linha
-          process.stdout.write(`Upload: ${(progress * 100).toFixed(2)}%`); // Escreve a porcentagem
+          process.stdout.clearLine(0);
+          process.stdout.cursorTo(0);
+          process.stdout.write(`Upload: ${Math.round(progress * 100)}%`); // Arredonda para inteiro
         },
       };
 
       console.log("Enviando arquivo para chatId:", chatId);
       await client.sendFile(chatId, fileOptions);
 
-      process.stdout.write("\n"); // Adiciona uma nova linha após o upload
+      process.stdout.write("\n");
 
       try {
         if (sentMessage && sentMessage.id) {
-          // Adiciona um atraso antes de deletar a mensagem
           await new Promise(resolve => setTimeout(resolve, 1000));
           await client.deleteMessages(chatId, [sentMessage.id], { revoke: true });
         } else {
@@ -136,16 +135,16 @@ async function uploadFile(filePath, chatId, threadId) {
 
     console.log(`\nArquivo ${filePath} enviado com sucesso!`);
     fs.unlinkSync(filePath);
-    return true; // Retorna true em caso de sucesso
+    return true;
   } catch (error) {
     console.error("Erro ao enviar arquivo:", error);
     throw new Error("Falha ao enviar arquivo para o Telegram");
-    return false; // Retorna false em caso de falha
+    return false;
   }
 }
 
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, threadId, messageId } = req.body; // Recebe messageId
+  const { fileUrl, chatId, threadId, messageId } = req.body;
 
   if (!fileUrl || !chatId) {
     return res.status(400).json({ error: "URL do arquivo e ID do chat são obrigatórios" });
@@ -160,7 +159,7 @@ app.post("/upload", async (req, res) => {
 
     if (success) {
       try {
-        await client.deleteMessages(chatId, [messageId], { revoke: true }); // Apaga a mensagem original
+        await client.deleteMessages(chatId, [messageId], { revoke: true });
         res.status(200).json({ success: true });
       } catch (deleteOriginalMessageError) {
         console.error("Erro ao deletar mensagem original:", deleteOriginalMessageError);
