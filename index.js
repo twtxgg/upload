@@ -3,6 +3,7 @@ const fs = require("fs");
 const axios = require("axios");
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
+const readlineSync = require("readline-sync");
 const path = require("path");
 require("dotenv").config();
 
@@ -12,7 +13,7 @@ app.use(express.json());
 
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE";
+const phoneNumber = process.env.PHONE_NUMBER;
 
 const sessionFile = "session.txt";
 let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
@@ -25,9 +26,13 @@ let fileName;
 
 async function startClient() {
   await client.start({
-    botAuthToken: botToken,
+    phoneNumber: async () => phoneNumber,
+    password: async () => "meuamor17",
+    phoneCode: async () =>
+      readlineSync.question("Enter the code you received: "),
     onError: (err) => console.error(err),
   });
+  console.log("Connected to Telegram");
   fs.writeFileSync(sessionFile, client.session.save());
 }
 
@@ -46,21 +51,6 @@ async function downloadFile(fileUrl) {
       responseType: "stream",
     });
 
-    const totalLength = response.headers["content-length"];
-    let downloadedLength = 0;
-
-    response.data.on("data", (chunk) => {
-      downloadedLength += chunk.length;
-      const progress = (downloadedLength / totalLength) * 100;
-      process.stdout.clearLine(0);
-      process.stdout.cursorTo(0);
-      process.stdout.write(`Download: ${progress.toFixed(2)}%`);
-    });
-
-    response.data.on("end", () => {
-      process.stdout.write("\n");
-    });
-
     response.data.pipe(writer);
 
     return new Promise((resolve, reject) => {
@@ -70,90 +60,99 @@ async function downloadFile(fileUrl) {
       });
     });
   } catch (err) {
-    console.error("Erro durante a requisição axios:", err.message);
+    console.error("Error during axios request:", err.message);
     throw err;
+  }
+}
+
+async function downloadTelegramFile(file, chatId) {
+  try {
+    fileName = file.name;
+    const filePath = path.join(__dirname, "upload", fileName);
+    await client.downloadMedia(file, {
+      output: filePath,
+      progressCallback: (progress) => {
+        console.log(`Download progress for ${fileName}: ${progress}%`);
+      },
+    });
+    return filePath;
+  } catch (error) {
+    console.error("Error downloading Telegram file:", error);
+    throw error;
   }
 }
 
 async function uploadFile(filePath, chatId, threadId) {
   try {
     let messageOptions = {
-      message: `Enviando arquivo: ${fileName}`,
+      message: `Uploading file: ${fileName}`,
     };
 
     if (threadId) {
       messageOptions.replyTo = threadId;
     }
 
-    let sentMessage;
-    try {
-      sentMessage = await client.sendMessage(chatId, messageOptions);
-    } catch (sendMsgError) {
-      throw new Error("Falha ao enviar mensagem inicial.");
+    await client.sendMessage(chatId, messageOptions);
+
+    let fileOptions = {
+      file: filePath,
+      caption: fileName,
+      supportsStreaming: true,
+    };
+
+    if (threadId) {
+      fileOptions.replyTo = threadId;
     }
 
-    if (sentMessage && sentMessage.id) {
-      let fileOptions = {
-        file: filePath,
-        caption: fileName,
-        supportsStreaming: true,
-        progressCallback: (progress) => {
-          process.stdout.clearLine(0);
-          process.stdout.cursorTo(0);
-          process.stdout.write(`Upload: ${(progress * 100).toFixed(2)}%`);
-        },
-      };
+    await client.sendFile(chatId, fileOptions);
 
-      await client.sendFile(chatId, fileOptions);
-
-      process.stdout.write("\n");
-
-      try {
-        if (sentMessage && sentMessage.id) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          await client.deleteMessages(chatId, [sentMessage.id], { revoke: true });
-        }
-      } catch (deleteMsgError) {
-        console.error("Erro ao deletar mensagem inicial:", deleteMsgError);
-      }
-    } else {
-      throw new Error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
-    }
-
+    console.log(`\nFile ${filePath} uploaded successfully!`);
     fs.unlinkSync(filePath);
-    return true;
+    return;
   } catch (error) {
-    throw new Error("Falha ao enviar arquivo para o Telegram");
+    console.error("Error uploading file:", error);
+    throw new Error("Failed to upload file to Telegram");
   }
 }
 
 app.post("/upload", async (req, res) => {
   const { fileUrl, chatId, threadId, messageId } = req.body;
 
-  if (!fileUrl || !chatId) {
-    return res.status(400).json({ error: "URL do arquivo e ID do chat são obrigatórios" });
+  if (!chatId) {
+    return res.status(400).json({ error: "Chat ID is required" });
   }
 
   try {
     await startClient();
-    const filePath = await downloadFile(fileUrl);
-    const success = await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
+    const chat = await client.getEntity(chatId);
+    let filePath;
 
-    if (success) {
-      try {
-        await client.deleteMessages(chatId, [messageId], { revoke: true });
-        res.status(200).json({ success: true });
-      } catch (deleteOriginalMessageError) {
-        res.status(500).json({ success: false, error: "Falha ao deletar mensagem original." });
+    if (messageId) {
+      const message = await client.getMessageById(chatId, messageId);
+      if (message && message.media) {
+        filePath = await downloadTelegramFile(message.media, chatId);
+      } else if (fileUrl) {
+        filePath = await downloadFile(fileUrl);
+      } else {
+        return res.status(400).json({ error: "No media or file URL provided." });
       }
+    } else if (fileUrl) {
+      filePath = await downloadFile(fileUrl);
     } else {
-      res.status(500).json({ success: false, error: "Falha ao enviar arquivo." });
+      return res.status(400).json({ error: "No media or file URL provided." });
     }
+
+    if (chat.className === "User" || chat.className === "Chat" || chat.className === "Channel") {
+      await uploadFile(filePath, chatId, threadId);
+    }
+
+    res.status(200).json({ message: "File uploaded successfully!" });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error("Error:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Servidor rodando na porta ${port}`);
+  console.log(`Server running on port ${port}`);
 });
