@@ -67,6 +67,12 @@ async function downloadFile(fileUrl, chatId) {
           lastProgress = 50;
         } catch (error) {
           console.error("Erro ao editar mensagem de progresso do download:", error);
+          // Se a edição falhar, apaga a mensagem de progresso
+          try {
+            await client.deleteMessages(chatId, [progressMessage.id], { revoke: true });
+          } catch (deleteError) {
+            console.error("Erro ao apagar mensagem de progresso do download:", deleteError);
+          }
         }
       }
     });
@@ -139,6 +145,12 @@ async function uploadFile(filePath, chatId, threadId) {
               lastProgress = 50;
             } catch (error) {
               console.error("Erro ao editar mensagem de progresso do upload:", error);
+              // Se a edição falhar, apaga a mensagem de progresso
+              try {
+                await client.deleteMessages(chatId, [progressMessage.id], { revoke: true });
+              } catch (deleteError) {
+                console.error("Erro ao apagar mensagem de progresso do upload:", deleteError);
+              }
             }
           }
         },
@@ -191,15 +203,3 @@ app.post("/upload", async (req, res) => {
         console.error("Erro ao deletar mensagem original:", deleteOriginalMessageError);
         res.status(500).json({ success: false, error: "Falha ao deletar mensagem original." });
       }
-    } else {
-      res.status(500).json({ success: false, error: "Falha ao enviar arquivo." });
-    }
-  } catch (error) {
-    console.error("Erro:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.listen(port, () => {
-  console.log(`Servidor rodando na porta ${port}`);
-});
