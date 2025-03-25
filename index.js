@@ -51,10 +51,10 @@ async function downloadFile(fileUrl) {
 
     response.data.on("data", (chunk) => {
       downloadedLength += chunk.length;
-      const progress = Math.round((downloadedLength / totalLength) * 100); // Arredonda para inteiro
+      const progress = (downloadedLength / totalLength) * 100;
       process.stdout.clearLine(0);
       process.stdout.cursorTo(0);
-      process.stdout.write(`Download: ${progress}%`); // Exibe apenas o número inteiro
+      process.stdout.write(`Download: ${progress.toFixed(2)}%`);
     });
 
     response.data.on("end", () => {
@@ -100,7 +100,7 @@ async function uploadFile(filePath, chatId, threadId) {
         progressCallback: (progress) => {
           process.stdout.clearLine(0);
           process.stdout.cursorTo(0);
-          process.stdout.write(`Upload: ${Math.round(progress * 100)}%`); // Exibe apenas o número inteiro
+          process.stdout.write(`Upload: ${(progress * 100).toFixed(2)}%`);
         },
       };
 
