@@ -28,11 +28,10 @@ async function startClient() {
     botAuthToken: botToken,
     onError: (err) => console.error(err),
   });
-  console.log("Conectado ao Telegram");
   fs.writeFileSync(sessionFile, client.session.save());
 }
 
-async function downloadFileFromUrl(fileUrl) {
+async function downloadFile(fileUrl) {
   try {
     const urlObj = new URL(fileUrl);
     const encodedFileName = urlObj.pathname;
@@ -76,66 +75,81 @@ async function downloadFileFromUrl(fileUrl) {
   }
 }
 
-async function downloadFileFromTelegram(messageId, chatId) {
+async function uploadFile(filePath, chatId, threadId) {
   try {
-    const message = await client.getMessageById(chatId, messageId);
-    if (!message.media) {
-      throw new Error("Mensagem não contém mídia.");
+    let messageOptions = {
+      message: `Enviando arquivo: ${fileName}`,
+    };
+
+    if (threadId) {
+      messageOptions.replyTo = threadId;
     }
-    const filePath = await client.downloadMedia(message.media, {
-      progressCallback: (progress) => {
-        process.stdout.clearLine(0);
-        process.stdout.cursorTo(0);
-        process.stdout.write(`Download: ${(progress * 100).toFixed(2)}%`);
-      },
-    });
-    process.stdout.write("\n");
-    fileName = path.basename(filePath);
-    return filePath;
-  } catch (err) {
-    console.error("Erro ao baixar arquivo do Telegram:", err);
-    throw err;
+
+    let sentMessage;
+    try {
+      sentMessage = await client.sendMessage(chatId, messageOptions);
+    } catch (sendMsgError) {
+      throw new Error("Falha ao enviar mensagem inicial.");
+    }
+
+    if (sentMessage && sentMessage.id) {
+      let fileOptions = {
+        file: filePath,
+        caption: fileName,
+        supportsStreaming: true,
+        progressCallback: (progress) => {
+          process.stdout.clearLine(0);
+          process.stdout.cursorTo(0);
+          process.stdout.write(`Upload: ${(progress * 100).toFixed(2)}%`);
+        },
+      };
+
+      await client.sendFile(chatId, fileOptions);
+
+      process.stdout.write("\n");
+
+      try {
+        if (sentMessage && sentMessage.id) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          await client.deleteMessages(chatId, [sentMessage.id], { revoke: true });
+        }
+      } catch (deleteMsgError) {
+        console.error("Erro ao deletar mensagem inicial:", deleteMsgError);
+      }
+    } else {
+      throw new Error("Falha ao enviar mensagem inicial ou obter ID da mensagem.");
+    }
+
+    fs.unlinkSync(filePath);
+    return true;
+  } catch (error) {
+    throw new Error("Falha ao enviar arquivo para o Telegram");
   }
 }
 
-async function uploadFile(filePath, chatId, threadId) {
-  // ... (código da função uploadFile permanece o mesmo)
-}
-
 app.post("/upload", async (req, res) => {
-  const { fileUrl, forwardedMessageId, chatId, threadId, messageId } = req.body;
+  const { fileUrl, chatId, threadId, messageId } = req.body;
 
-  if (!chatId) {
-    return res.status(400).json({ error: "ID do chat é obrigatório" });
+  if (!fileUrl || !chatId) {
+    return res.status(400).json({ error: "URL do arquivo e ID do chat são obrigatórios" });
   }
 
   try {
     await startClient();
-    let filePath;
-
-    if (forwardedMessageId) {
-      filePath = await downloadFileFromTelegram(forwardedMessageId, chatId);
-    } else if (fileUrl) {
-      filePath = await downloadFileFromUrl(fileUrl);
-    } else {
-      return res.status(400).json({ error: "URL do arquivo ou ID da mensagem encaminhada são obrigatórios" });
-    }
-
-    const success = await uploadFile(filePath, chatId, threadId);
+    const filePath = await downloadFile(fileUrl);
+    const success = await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
 
     if (success) {
       try {
         await client.deleteMessages(chatId, [messageId], { revoke: true });
         res.status(200).json({ success: true });
       } catch (deleteOriginalMessageError) {
-        console.error("Erro ao deletar mensagem original:", deleteOriginalMessageError);
         res.status(500).json({ success: false, error: "Falha ao deletar mensagem original." });
       }
     } else {
       res.status(500).json({ success: false, error: "Falha ao enviar arquivo." });
     }
   } catch (error) {
-    console.error("Erro:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
