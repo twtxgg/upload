@@ -155,6 +155,7 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
   try {
     const isVideo = /\.(mp4|mov|avi|mkv)$/i.test(path.extname(fileName));
     
+    // Configurações básicas do arquivo
     const fileOptions = {
       file: filePath,
       caption: fileName,
@@ -164,30 +165,48 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
         readline.cursorTo(process.stdout, 0);
         process.stdout.write(`Upload: ${percent}%`);
       },
+      workers: 1 // Adicionado para melhor estabilidade
     };
 
+    // Configurações adicionais para vídeos
     if (isVideo) {
       fileOptions.supportsStreaming = true;
       fileOptions.attributes = [{
         _: 'documentAttributeVideo',
-        duration: 0,
-        w: 1280,
-        h: 720,
+        duration: 0, // O Telegram pode detectar automaticamente
+        w: 1280,     // Largura padrão
+        h: 720,      // Altura padrão
         roundMessage: false,
         supportsStreaming: true
       }];
       fileOptions.mimeType = 'video/mp4';
+    } else {
+      // Configurações para outros tipos de arquivo
+      fileOptions.forceDocument = true;
     }
 
+    // Verifica se o arquivo existe antes de enviar
+    try {
+      await fsp.access(filePath);
+    } catch {
+      throw new Error("Arquivo local não encontrado após download");
+    }
+
+    // Envia mensagem de início
     await client.sendMessage(chatId, {
       message: `📤 Enviando ${isVideo ? 'vídeo' : 'arquivo'}: ${fileName}`,
       replyTo: threadId
     });
 
+    // Envia o arquivo
+    const fileStats = await fsp.stat(filePath);
+    console.log(`Tamanho do arquivo: ${fileStats.size} bytes`);
+    
     await client.sendFile(chatId, fileOptions);
     process.stdout.write("\n");
     console.log(`Arquivo enviado com sucesso: ${fileName}`);
 
+    // Remove o arquivo local
     try {
       await fsp.unlink(filePath);
     } catch (unlinkError) {
@@ -195,16 +214,21 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
     }
     
   } catch (error) {
-    console.error("\nErro ao enviar arquivo:", error);
+    console.error("\nErro detalhado ao enviar arquivo:", {
+      message: error.message,
+      stack: error.stack,
+      fileName,
+      filePath
+    });
     
+    // Tenta remover o arquivo temporário mesmo em caso de erro
     try {
       await fsp.unlink(filePath).catch(() => {});
     } catch {}
     
-    throw new Error("Falha ao enviar arquivo para o Telegram");
+    throw new Error(`Falha ao enviar arquivo para o Telegram: ${error.message}`);
   }
 }
-
 /**
  * Processa comandos recebidos via mensagem
  */
