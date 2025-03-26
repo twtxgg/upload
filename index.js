@@ -189,6 +189,43 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
   }
 }
 
+/**
+ * Processa comandos recebidos via mensagem
+ */
+async function processCommand(command, chatId) {
+  try {
+    // Comando /rename - formato: /rename novo_nome url_do_arquivo
+    if (command.startsWith('/rename')) {
+      const parts = command.split(' ');
+      if (parts.length < 3) {
+        await client.sendMessage(chatId, {
+          message: "Formato incorreto. Use: /rename novo_nome url_do_arquivo"
+        });
+        return;
+      }
+      
+      const customName = parts[1];
+      const fileUrl = parts.slice(2).join(' ');
+      
+      await client.sendMessage(chatId, {
+        message: `⏳ Iniciando download e renomeando para: ${customName}`
+      });
+      
+      const { fileName, filePath } = await downloadFile(fileUrl, customName);
+      await uploadFile(filePath, fileName, chatId);
+      
+      await client.sendMessage(chatId, {
+        message: `✅ Arquivo renomeado e enviado com sucesso como: ${customName}`
+      });
+    }
+  } catch (error) {
+    console.error("Erro ao processar comando:", error);
+    await client.sendMessage(chatId, {
+      message: `❌ Erro: ${error.message}`
+    });
+  }
+}
+
 // Rota de upload
 app.post("/upload", async (req, res) => {
   const { fileUrl, chatId, threadId, customName } = req.body;
@@ -214,6 +251,33 @@ app.post("/upload", async (req, res) => {
     res.status(500).json({ 
       success: false,
       error: error.message || "Erro ao processar o arquivo"
+    });
+  }
+});
+
+// Rota para processar comandos via HTTP (para integração com webhooks)
+app.post("/command", async (req, res) => {
+  const { command, chatId } = req.body;
+
+  if (!command || !chatId) {
+    return res.status(400).json({ 
+      error: "Comando e ID do chat são obrigatórios" 
+    });
+  }
+
+  try {
+    await startClient();
+    await processCommand(command, chatId);
+    
+    res.status(200).json({ 
+      success: true,
+      message: "Comando processado com sucesso!"
+    });
+  } catch (error) {
+    console.error("Erro no processamento:", error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message || "Erro ao processar o comando"
     });
   }
 });
