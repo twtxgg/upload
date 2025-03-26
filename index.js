@@ -3,20 +3,16 @@ const fs = require("fs");
 const axios = require("axios");
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
-const readlineSync = require("readline-sync");
 const path = require("path");
 require("dotenv").config();
 
-let fileName;
-let bot;
-const botUsername = "@uploadwgbot";
 const app = express();
 const port = process.env.PORT || 3000;
 app.use(express.json());
 
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const phoneNumber = process.env.PHONE_NUMBER;
+const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE";
 
 const sessionFile = "session.txt";
 let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
@@ -25,16 +21,14 @@ const client = new TelegramClient(stringSession, apiId, apiHash, {
   connectionRetries: 5,
 });
 
+let fileName;
+
 async function startClient() {
   await client.start({
-    phoneNumber: async () => phoneNumber,
-    password: async () => "meuamor17",
-    phoneCode: async () =>
-      readlineSync.question("Enter the code you received: "),
+    botAuthToken: botToken,
     onError: (err) => console.error(err),
   });
-  bot = await client.getEntity(botUsername);
-  console.log("Connected to Telegram");
+  console.log("Conectado ao Telegram");
   fs.writeFileSync(sessionFile, client.session.save());
 }
 
@@ -53,6 +47,21 @@ async function downloadFile(fileUrl) {
       responseType: "stream",
     });
 
+    const totalLength = response.headers["content-length"];
+    let downloadedLength = 0;
+
+    response.data.on("data", (chunk) => {
+      downloadedLength += chunk.length;
+      const progress = Math.round((downloadedLength / totalLength) * 100);
+      process.stdout.clearLine(0);
+      process.stdout.cursorTo(0);
+      process.stdout.write(`Download: ${progress}%`);
+    });
+
+    response.data.on("end", () => {
+      process.stdout.write("\n");
+    });
+
     response.data.pipe(writer);
 
     return new Promise((resolve, reject) => {
@@ -62,51 +71,78 @@ async function downloadFile(fileUrl) {
       });
     });
   } catch (err) {
-    console.error("Error during axios request:", err.message);
+    console.error("Erro durante a requisição axios:", err.message);
     throw err;
   }
 }
 
-async function uploadFile(filePath, chatId, threadId) { //Adicionado threadId
+async function uploadFile(filePath, chatId, threadId) {
   try {
-    await client.sendMessage(chatId, {
-      message: `Uploading file: ${fileName}`,
-      replyTo: threadId, //Enviando a mensagem na thread
-    });
-    await client.sendFile(chatId, {
+    const me = await client.getMe();
+    console.log("Informação do bot:", me);
+
+    const chat = await client.getEntity(chatId);
+    console.log("Informação do chat:", chat);
+
+    let messageOptions = {
+      message: `Enviando arquivo: ${fileName}`,
+    };
+
+    if (threadId) {
+      messageOptions.replyTo = threadId;
+    }
+
+    console.log("Enviando mensagem para chatId:", chatId);
+    await client.sendMessage(chatId, messageOptions);
+
+    let fileOptions = {
       file: filePath,
       caption: fileName,
       supportsStreaming: true,
-      replyTo: threadId, //Enviando o arquivo na thread
       progressCallback: (progress) => {
-        process.stdout.write(`\rUploaded: ${Math.round(progress * 100)}%`);
+        process.stdout.clearLine(0);
+        process.stdout.cursorTo(0);
+        process.stdout.write(`Upload: ${Math.round(progress * 100)}%`);
       },
-    });
-    console.log(`\nFile ${filePath} uploaded successfully!`);
+    };
+
+    console.log("Enviando arquivo para chatId:", chatId);
+    await client.sendFile(chatId, fileOptions);
+
+    process.stdout.write("\n");
+    console.log(`\nArquivo ${filePath} enviado com sucesso!`);
     fs.unlinkSync(filePath);
     return;
   } catch (error) {
-    console.error("Error uploading file:", error);
-    throw new Error("Failed to upload file to Telegram");
+    console.error("Erro ao enviar arquivo:", error);
+    throw new Error("Falha ao enviar arquivo para o Telegram");
   }
 }
 
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, threadId } = req.body; //Adicionado chatId e threadId
-  if (!fileUrl || !chatId || !threadId) { //Verifica se o chatId e threadId existem.
-    return res.status(400).json({ error: "File URL, chat ID, and thread ID are required" });
+  const { fileUrl, chatId, threadId } = req.body;
+
+  if (!fileUrl || !chatId) {
+    return res.status(400).json({ error: "URL do arquivo e ID do chat são obrigatórios" });
   }
+
   try {
     await startClient();
     const filePath = await downloadFile(fileUrl);
-    await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId); //Envia o arquivo para o chatId e threadId
-    res.status(200).json({ message: "File uploaded successfully!" });
+    const chat = await client.getEntity(chatId);
+
+    if (chat.className === "User" || chat.className === "Chat" || chat.className === "Channel") {
+      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
+      res.status(200).json({ message: "Arquivo enviado com sucesso!" });
+    } else {
+      res.status(400).json({ error: "Chat ID inválido" });
+    }
   } catch (error) {
-    console.error("Error:", error);
+    console.error("Erro:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  console.log(`Servidor rodando na porta ${port}`);
 });
