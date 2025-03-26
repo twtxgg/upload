@@ -78,19 +78,40 @@ async function startTelegramClient() {
   }
 }
 
-function isSupportedFileType(url) {
+async function isSupportedFileType(url) {
   const supportedExtensions = [".mp4", ".mov", ".avi", ".mkv", ".pdf", ".zip"];
   try {
     const urlObj = new URL(url);
     const extension = path.extname(urlObj.pathname.toLowerCase());
-    return supportedExtensions.includes(extension);
+    
+    // Se tiver extensão conhecida, aceita
+    if (supportedExtensions.includes(extension)) {
+      return true;
+    }
+    
+    // Se não tiver extensão, verifica o header Content-Type
+    const response = await axios.head(url);
+    const contentType = response.headers['content-type'];
+    
+    // Tipos MIME suportados
+    const supportedMimeTypes = [
+      'video/mp4',
+      'video/quicktime',
+      'video/x-msvideo',
+      'video/x-matroska',
+      'application/pdf',
+      'application/zip'
+    ];
+    
+    return supportedMimeTypes.some(mime => contentType.includes(mime));
+    
   } catch {
     return false;
   }
 }
 
 async function downloadFile(fileUrl, customName = null) {
-  if (!isSupportedFileType(fileUrl)) {
+  if (!(await isSupportedFileType(fileUrl))) {
     throw new Error("Tipo de arquivo não suportado");
   }
 
