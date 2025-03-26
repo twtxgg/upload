@@ -174,9 +174,20 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
     const fileExtension = path.extname(filePath).toLowerCase();
     const isVideo = ['.mp4', '.mov', '.avi', '.mkv'].includes(fileExtension);
 
+    // Configuração inicial para envio
     const fileOptions = {
       file: filePath,
       caption: finalCaption,
+      ...(isVideo && {
+        supportsStreaming: true,
+        attributes: [{
+          _: 'documentAttributeVideo',
+          supportsStreaming: true,
+          duration: 0,
+          w: 0,
+          h: 0
+        }]
+      }),
       ...(threadId && { replyTo: threadId }),
       progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
@@ -186,29 +197,35 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
       },
     };
 
-    // Envia primeiro sem atributos específicos
-    const message = await client.sendFile(chatId, fileOptions);
+    // Envia o arquivo uma única vez com todos os atributos
+    await client.sendFile(chatId, fileOptions);
+    process.stdout.write("\n");
+    console.log(`✅ Arquivo enviado: ${finalCaption}`);
+
+    fs.unlinkSync(filePath);
+  } catch (error) {
+    console.error("\n❌ Erro ao enviar arquivo:", error);
     
-    // Se for vídeo, edita para adicionar atributos
-    if (isVideo && message) {
+    // Fallback para envio simples se houver erro com atributos de vídeo
+    if (error.message.includes('InputMediaUploadedDocument')) {
       try {
-        await client.editMessage(chatId, {
-          message: message.id,
+        console.log("Tentando enviar sem atributos de vídeo...");
+        await client.sendFile(chatId, {
           file: filePath,
-          attributes: [
-            {
-              _: 'documentAttributeVideo',
-              supportsStreaming: true,
-              duration: 0,
-              w: 0,
-              h: 0
-            }
-          ]
+          caption: finalCaption,
+          ...(threadId && { replyTo: threadId })
         });
-      } catch (editError) {
-        console.error("❌ Erro ao editar mensagem (o arquivo foi enviado):", editError);
+        console.log("✅ Arquivo enviado (sem streaming)");
+        fs.unlinkSync(filePath);
+        return;
+      } catch (fallbackError) {
+        console.error("❌ Falha no envio alternativo:", fallbackError);
       }
     }
+    
+    throw new Error(`Falha no envio: ${error.message}`);
+  }
+}
 
     process.stdout.write("\n");
     console.log(`✅ Arquivo enviado: ${finalCaption}`);
