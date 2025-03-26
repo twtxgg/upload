@@ -43,11 +43,16 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 }
 
 /**
- * Gera um nome de arquivo único com timestamp
+ * Gera um nome de arquivo seguro
  */
-function generateUniqueFilename(originalName, customName = null) {
+function generateSafeFilename(originalName, customName = null) {
   const ext = path.extname(originalName);
-  const base = customName || path.basename(originalName, ext);
+  let base = customName || path.basename(originalName, ext);
+  
+  // Remove caracteres inválidos
+  base = base.replace(/[\/\\:*?"<>|]/g, '');
+  base = base.substring(0, 100); // Limita o tamanho
+  
   const timestamp = Date.now();
   return `${base}_${timestamp}${ext}`;
 }
@@ -99,13 +104,11 @@ async function downloadFile(fileUrl, customName = null) {
     const decodedFileName = decodeURIComponent(encodedFileName);
     let originalName = path.basename(decodedFileName);
 
-    // Verifica se o nome do arquivo tem uma extensão
     if (!path.extname(originalName)) {
       originalName += ".mp4";
     }
 
-    // Gera o nome final do arquivo
-    const finalName = generateUniqueFilename(originalName, customName);
+    const finalName = generateSafeFilename(originalName, customName);
     const filePath = path.join(UPLOAD_DIR, finalName);
     const writer = fs.createWriteStream(filePath);
 
@@ -116,7 +119,6 @@ async function downloadFile(fileUrl, customName = null) {
       maxContentLength: MAX_FILE_SIZE,
     });
 
-    // Verifica o tamanho do arquivo
     const contentLength = response.headers["content-length"];
     if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) {
       throw new Error(`Arquivo muito grande (limite: ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
@@ -135,7 +137,7 @@ async function downloadFile(fileUrl, customName = null) {
     await new Promise((resolve, reject) => {
       response.data.pipe(writer);
       writer.on("finish", () => {
-        process.stdout.write("\n"); // Nova linha ao finalizar
+        process.stdout.write("\n");
         resolve();
       });
       writer.on("error", reject);
@@ -157,13 +159,11 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
     const chat = await client.getEntity(chatId);
     console.log(`Enviando arquivo para ${chat.title || chat.username}`);
 
-    // Envia mensagem de início
     await client.sendMessage(chatId, {
       message: `📤 Enviando arquivo: ${fileName}`,
       replyTo: threadId
     });
 
-    // Opções para o arquivo
     const fileOptions = {
       file: filePath,
       caption: fileName,
@@ -176,12 +176,10 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
       },
     };
 
-    // Envia o arquivo
     await client.sendFile(chatId, fileOptions);
-    process.stdout.write("\n"); // Nova linha ao finalizar
+    process.stdout.write("\n");
     console.log(`Arquivo enviado com sucesso: ${fileName}`);
 
-    // Remove o arquivo local
     fs.unlinkSync(filePath);
   } catch (error) {
     console.error("\nErro ao enviar arquivo:", error);
@@ -191,7 +189,7 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
 
 // Rota de upload
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, threadId, customName } = req.body;
+  const { fileUrl, chatId, customName } = req.body;
 
   if (!fileUrl || !chatId) {
     return res.status(400).json({ 
@@ -202,7 +200,7 @@ app.post("/upload", async (req, res) => {
   try {
     await startClient();
     const { fileName, filePath } = await downloadFile(fileUrl, customName);
-    await uploadFile(filePath, fileName, chatId, threadId);
+    await uploadFile(filePath, fileName, chatId);
     
     res.status(200).json({ 
       success: true,
