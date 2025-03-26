@@ -12,7 +12,7 @@ app.use(express.json());
 
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE";
+const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE"; // Usando o token do bot fornecido
 
 const sessionFile = "session.txt";
 let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
@@ -25,7 +25,7 @@ let fileName;
 
 async function startClient() {
   await client.start({
-    botAuthToken: botToken,
+    botAuthToken: botToken, // Usando o token do bot
     onError: (err) => console.error(err),
   });
   console.log("Conectado ao Telegram");
@@ -39,32 +39,12 @@ async function downloadFile(fileUrl) {
     const decodedFileName = decodeURIComponent(encodedFileName);
     fileName = path.basename(decodedFileName);
 
-    // Verifica se o nome do arquivo tem uma extensão
-    if (!path.extname(fileName)) {
-      fileName += ".mp4"; // Adiciona a extensão .mp4 se não houver extensão
-    }
-
     const writer = fs.createWriteStream(path.join(__dirname, "upload", fileName));
 
     const response = await axios({
       method: "get",
       url: fileUrl,
       responseType: "stream",
-    });
-
-    const totalLength = response.headers["content-length"];
-    let downloadedLength = 0;
-
-    response.data.on("data", (chunk) => {
-      downloadedLength += chunk.length;
-      const progress = Math.round((downloadedLength / totalLength) * 100);
-      process.stdout.clearLine(0);
-      process.stdout.cursorTo(0);
-      process.stdout.write(`Download: ${progress}%`);
-    });
-
-    response.data.on("end", () => {
-      process.stdout.write("\n");
     });
 
     response.data.pipe(writer);
@@ -104,17 +84,15 @@ async function uploadFile(filePath, chatId, threadId) {
       file: filePath,
       caption: fileName,
       supportsStreaming: true,
-      progressCallback: (progress) => {
-        process.stdout.clearLine(0);
-        process.stdout.cursorTo(0);
-        process.stdout.write(`Upload: ${Math.round(progress * 100)}%`);
-      },
     };
+
+    if (threadId) {
+      fileOptions.replyTo = threadId;
+    }
 
     console.log("Enviando arquivo para chatId:", chatId);
     await client.sendFile(chatId, fileOptions);
 
-    process.stdout.write("\n");
     console.log(`\nArquivo ${filePath} enviado com sucesso!`);
     fs.unlinkSync(filePath);
     return;
@@ -136,12 +114,13 @@ app.post("/upload", async (req, res) => {
     const filePath = await downloadFile(fileUrl);
     const chat = await client.getEntity(chatId);
 
-    if (chat.className === "User" || chat.className === "Chat" || chat.className === "Channel") {
+    if (chat.className === "User" || chat.className === "Chat") {
       await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
-      res.status(200).json({ message: "Arquivo enviado com sucesso!" });
-    } else {
-      res.status(400).json({ error: "Chat ID inválido" });
+    } else if (chat.className === "Channel") {
+      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
     }
+
+    res.status(200).json({ message: "Arquivo enviado com sucesso!" });
   } catch (error) {
     console.error("Erro:", error);
     res.status(500).json({ error: error.message });
