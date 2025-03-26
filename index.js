@@ -12,6 +12,9 @@ require("dotenv").config();
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Configurações de proxy para rate limiting
+app.set('trust proxy', 1); // Adiciona esta linha para resolver o erro do X-Forwarded-For
+
 // Configurações de segurança
 app.use(helmet());
 app.use(express.json({ limit: "10mb" }));
@@ -19,7 +22,9 @@ app.use(express.json({ limit: "10mb" }));
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100 // limite de 100 requisições por IP
+  max: 100, // limite de 100 requisições por IP
+  standardHeaders: true, // Retorna info de rate limit nos headers
+  legacyHeaders: false, // Desabilita headers antigos
 });
 app.use(limiter);
 
@@ -42,13 +47,12 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR);
 }
 
-/*
- * Gera um nome de arquivo único com timestamp (só adiciona timestamp se não houver customName)
+/**
+ * Gera um nome de arquivo único (sem timestamp quando tem customName)
  */
 function generateUniqueFilename(originalName, customName = null) {
   const ext = path.extname(originalName);
   
-  // Se tiver customName, usa exatamente o nome fornecido (sem timestamp)
   if (customName) {
     // Remove a extensão se já estiver no customName
     const customWithoutExt = customName.endsWith(ext) 
@@ -61,6 +65,25 @@ function generateUniqueFilename(originalName, customName = null) {
   const base = path.basename(originalName, ext);
   const timestamp = Date.now();
   return `${base}_${timestamp}${ext}`;
+}
+
+/**
+ * Inicia o cliente do Telegram (agora exportada para uso nas rotas)
+ */
+async function startTelegramClient() {
+  try {
+    if (!client.connected) {
+      await client.start({
+        botAuthToken: botToken,
+        onError: (err) => console.error("Erro no cliente Telegram:", err),
+      });
+      console.log("Conectado ao Telegram");
+      fs.writeFileSync(sessionFile, client.session.save());
+    }
+  } catch (err) {
+    console.error("Falha ao iniciar cliente Telegram:", err);
+    throw err;
+  }
 }
 
 /**
@@ -91,12 +114,10 @@ async function downloadFile(fileUrl, customName = null) {
     const decodedFileName = decodeURIComponent(encodedFileName);
     let originalName = path.basename(decodedFileName);
 
-    // Verifica se o nome do arquivo tem uma extensão
     if (!path.extname(originalName)) {
       originalName += ".mp4";
     }
 
-    // Gera o nome final do arquivo
     const finalName = generateUniqueFilename(originalName, customName);
     const filePath = path.join(UPLOAD_DIR, finalName);
     const writer = fs.createWriteStream(filePath);
@@ -108,7 +129,6 @@ async function downloadFile(fileUrl, customName = null) {
       maxContentLength: MAX_FILE_SIZE,
     });
 
-    // Verifica o tamanho do arquivo
     const contentLength = response.headers["content-length"];
     if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) {
       throw new Error(`Arquivo muito grande (limite: ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
@@ -127,7 +147,7 @@ async function downloadFile(fileUrl, customName = null) {
     await new Promise((resolve, reject) => {
       response.data.pipe(writer);
       writer.on("finish", () => {
-        process.stdout.write("\n"); // Nova linha ao finalizar
+        process.stdout.write("\n");
         resolve();
       });
       writer.on("error", reject);
@@ -149,13 +169,11 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
     const chat = await client.getEntity(chatId);
     console.log(`Enviando arquivo para ${chat.title || chat.username}`);
 
-    // Envia mensagem de início
     await client.sendMessage(chatId, {
       message: `📤 Enviando arquivo: ${fileName}`,
       replyTo: threadId
     });
 
-    // Opções para o arquivo
     const fileOptions = {
       file: filePath,
       caption: fileName,
@@ -168,53 +186,14 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
       },
     };
 
-    // Envia o arquivo
     await client.sendFile(chatId, fileOptions);
-    process.stdout.write("\n"); // Nova linha ao finalizar
+    process.stdout.write("\n");
     console.log(`Arquivo enviado com sucesso: ${fileName}`);
 
-    // Remove o arquivo local
     fs.unlinkSync(filePath);
   } catch (error) {
     console.error("\nErro ao enviar arquivo:", error);
     throw new Error("Falha ao enviar arquivo para o Telegram");
-  }
-}
-
-/**
- * Processa comandos recebidos via mensagem
- */
-async function processCommand(command, chatId) {
-  try {
-    // Comando /rename - formato: /rename novo_nome url_do_arquivo
-    if (command.startsWith('/rename')) {
-      const parts = command.split(' ');
-      if (parts.length < 3) {
-        await client.sendMessage(chatId, {
-          message: "Formato incorreto. Use: /rename novo_nome url_do_arquivo"
-        });
-        return;
-      }
-      
-      const customName = parts[1];
-      const fileUrl = parts.slice(2).join(' ');
-      
-      await client.sendMessage(chatId, {
-        message: `⏳ Iniciando download e renomeando para: ${customName}`
-      });
-      
-      const { fileName, filePath } = await downloadFile(fileUrl, customName);
-      await uploadFile(filePath, fileName, chatId);
-      
-      await client.sendMessage(chatId, {
-        message: `✅ Arquivo renomeado e enviado com sucesso como: ${customName}`
-      });
-    }
-  } catch (error) {
-    console.error("Erro ao processar comando:", error);
-    await client.sendMessage(chatId, {
-      message: `❌ Erro: ${error.message}`
-    });
   }
 }
 
@@ -229,7 +208,7 @@ app.post("/upload", async (req, res) => {
   }
 
   try {
-    await startClient();
+    await startTelegramClient(); // Alterado de startClient para startTelegramClient
     const { fileName, filePath } = await downloadFile(fileUrl, customName);
     await uploadFile(filePath, fileName, chatId, threadId);
     
@@ -243,33 +222,6 @@ app.post("/upload", async (req, res) => {
     res.status(500).json({ 
       success: false,
       error: error.message || "Erro ao processar o arquivo"
-    });
-  }
-});
-
-// Rota para processar comandos via HTTP (para integração com webhooks)
-app.post("/command", async (req, res) => {
-  const { command, chatId } = req.body;
-
-  if (!command || !chatId) {
-    return res.status(400).json({ 
-      error: "Comando e ID do chat são obrigatórios" 
-    });
-  }
-
-  try {
-    await startClient();
-    await processCommand(command, chatId);
-    
-    res.status(200).json({ 
-      success: true,
-      message: "Comando processado com sucesso!"
-    });
-  } catch (error) {
-    console.error("Erro no processamento:", error);
-    res.status(500).json({ 
-      success: false,
-      error: error.message || "Erro ao processar o comando"
     });
   }
 });
