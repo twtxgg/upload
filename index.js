@@ -7,6 +7,7 @@ const path = require("path");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
 const readline = require("readline");
+const ffmpeg = require('fluent-ffmpeg');
 require("dotenv").config();
 
 const app = express();
@@ -86,6 +87,69 @@ function isSupportedFileType(url) {
 }
 
 /**
+ * Verifica e corrige metadados de vídeo
+ */
+async function ensureVideoMetadata(filePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) return reject(err);
+      
+      if (!metadata.format.duration || !metadata.streams[0].width) {
+        console.log('Metadados incompletos, recodificando vídeo...');
+        
+        const tempPath = filePath + '.temp.mp4';
+        ffmpeg(filePath)
+          .videoCodec('libx264')
+          .audioCodec('aac')
+          .format('mp4')
+          .on('end', () => {
+            fs.unlinkSync(filePath);
+            fs.renameSync(tempPath, filePath);
+            resolve();
+          })
+          .on('error', reject)
+          .save(tempPath);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+/**
+ * Verifica e ajusta resolução de vídeo se necessário
+ */
+async function checkVideoConstraints(filePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) return reject(err);
+      
+      const videoStream = metadata.streams.find(s => s.codec_type === 'video');
+      if (!videoStream) return resolve(); // Não é vídeo, não precisa processar
+      
+      if (videoStream.width > 1920 || videoStream.height > 1080) {
+        console.log('Redimensionando vídeo para 1080p...');
+        const tempPath = filePath + '.temp.mp4';
+        ffmpeg(filePath)
+          .size('1920x1080')
+          .videoCodec('libx264')
+          .audioCodec('aac')
+          .format('mp4')
+          .on('end', () => {
+            fs.unlinkSync(filePath);
+            fs.renameSync(tempPath, filePath);
+            resolve();
+          })
+          .on('error', reject)
+          .save(tempPath);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+/**
  * Baixa o arquivo da URL fornecida
  */
 async function downloadFile(fileUrl, customName = null) {
@@ -135,7 +199,7 @@ async function downloadFile(fileUrl, customName = null) {
     await new Promise((resolve, reject) => {
       response.data.pipe(writer);
       writer.on("finish", () => {
-        process.stdout.write("\n"); // Nova linha ao finalizar
+        process.stdout.write("\n");
         resolve();
       });
       writer.on("error", reject);
@@ -154,70 +218,73 @@ async function downloadFile(fileUrl, customName = null) {
  */
 async function uploadFile(filePath, fileName, chatId, threadId = null) {
   try {
-    // 1. Verificar e corrigir metadados
-    await ensureVideoMetadata(filePath);
-    
-    // 2. Verificar restrições de tamanho/resolução
-    await checkVideoConstraints(filePath);
-    
-    // 3. Obter metadados atualizados
-    const metadata = await new Promise((resolve, reject) => {
-      ffmpeg.ffprobe(filePath, (err, data) => {
-        if (err) reject(err);
-        else resolve(data);
+    // Processamento especial para vídeos
+    if (path.extname(fileName).match(/\.(mp4|mov|avi|mkv)$/i)) {
+      await ensureVideoMetadata(filePath);
+      await checkVideoConstraints(filePath);
+      
+      // Obter metadados atualizados para vídeo
+      const metadata = await new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(filePath, (err, data) => {
+          if (err) reject(err);
+          else resolve(data);
+        });
       });
-    });
 
-    const videoStream = metadata.streams.find(s => s.codec_type === 'video');
-    
-    // Envia mensagem de início
-    await client.sendMessage(chatId, {
-      message: `📤 Enviando arquivo: ${fileName}`,
-      replyTo: threadId
-    });
+      const videoStream = metadata.streams.find(s => s.codec_type === 'video');
+      
+      // Configurações otimizadas para vídeo
+      const fileOptions = {
+        file: filePath,
+        caption: fileName,
+        supportsStreaming: true,
+        attributes: [
+          {
+            _: 'documentAttributeVideo',
+            duration: metadata.format.duration || 0,
+            w: videoStream?.width || 1280,
+            h: videoStream?.height || 720,
+            roundMessage: false,
+            supportsStreaming: true
+          }
+        ],
+        mimeType: 'video/mp4',
+        progressCallback: (progress) => {
+          const percent = Math.round(progress * 100);
+          readline.clearLine(process.stdout, 0);
+          readline.cursorTo(process.stdout, 0);
+          process.stdout.write(`Upload: ${percent}%`);
+        },
+      };
 
-    // Configurações otimizadas para vídeo
-    const fileOptions = {
-      file: filePath,
-      caption: fileName,
-      supportsStreaming: true,
-      attributes: [
-        {
-          _: 'documentAttributeVideo',
-          duration: metadata.format.duration || 0,
-          w: videoStream?.width || 1280,
-          h: videoStream?.height || 720,
-          roundMessage: false,
-          supportsStreaming: true
-        }
-      ],
-      mimeType: 'video/mp4',
-      progressCallback: (progress) => {
-        const percent = Math.round(progress * 100);
-        readline.clearLine(process.stdout, 0);
-        readline.cursorTo(process.stdout, 0);
-        process.stdout.write(`Upload: ${percent}%`);
-      },
-    };
+      // Envia mensagem de início
+      await client.sendMessage(chatId, {
+        message: `📤 Enviando vídeo: ${fileName}`,
+        replyTo: threadId
+      });
 
-    // Envia o arquivo
-    await client.sendFile(chatId, fileOptions);
+      await client.sendFile(chatId, fileOptions);
+    } else {
+      // Processamento para outros tipos de arquivo
+      await client.sendMessage(chatId, {
+        message: `📤 Enviando arquivo: ${fileName}`,
+        replyTo: threadId
+      });
+
+      await client.sendFile(chatId, {
+        file: filePath,
+        caption: fileName,
+        progressCallback: (progress) => {
+          const percent = Math.round(progress * 100);
+          readline.clearLine(process.stdout, 0);
+          readline.cursorTo(process.stdout, 0);
+          process.stdout.write(`Upload: ${percent}%`);
+        },
+      });
+    }
+
     process.stdout.write("\n");
     console.log(`Arquivo enviado com sucesso: ${fileName}`);
-
-    // Remove o arquivo local
-    fs.unlinkSync(filePath);
-  } catch (error) {
-    console.error("\nErro ao enviar arquivo:", error);
-    throw new Error("Falha ao enviar arquivo para o Telegram");
-  }
-}
-    // Envia o arquivo
-    await client.sendFile(chatId, fileOptions);
-    process.stdout.write("\n"); // Nova linha ao finalizar
-    console.log(`Arquivo enviado com sucesso: ${fileName}`);
-
-    // Remove o arquivo local
     fs.unlinkSync(filePath);
   } catch (error) {
     console.error("\nErro ao enviar arquivo:", error);
@@ -291,7 +358,7 @@ app.post("/upload", async (req, res) => {
   }
 });
 
-// Rota para processar comandos via HTTP (para integração com webhooks)
+// Rota para processar comandos via HTTP
 app.post("/command", async (req, res) => {
   const { command, chatId } = req.body;
 
