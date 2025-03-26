@@ -169,15 +169,12 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
     const chat = await client.getEntity(chatId);
     console.log(`Enviando arquivo para ${chat.title || chat.username}`);
 
-    await client.sendMessage(chatId, {
-      message: `📤 Enviando arquivo: ${fileName}`,
-      replyTo: threadId
-    });
-
-    const fileOptions = {
+    // Envia como resposta à thread/comentário se threadId existir
+    const sendOptions = {
       file: filePath,
       caption: fileName,
       supportsStreaming: true,
+      replyTo: threadId || undefined, // Importante: undefined se threadId for null
       progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
         readline.clearLine(process.stdout, 0);
@@ -186,7 +183,7 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
       },
     };
 
-    await client.sendFile(chatId, fileOptions);
+    await client.sendFile(chatId, sendOptions);
     process.stdout.write("\n");
     console.log(`Arquivo enviado com sucesso: ${fileName}`);
 
