@@ -6,6 +6,7 @@ const { StringSession } = require("telegram/sessions");
 const path = require("path");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
+const readline = require("readline");
 require("dotenv").config();
 
 const app = express();
@@ -25,7 +26,7 @@ app.use(limiter);
 // Configurações do Telegram
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const botToken = process.env.BOT_TOKEN; // Removido o token hardcoded
+const botToken = process.env.BOT_TOKEN;
 const MAX_FILE_SIZE = 2000 * 1024 * 1024; // 2GB
 
 const sessionFile = "session.txt";
@@ -110,27 +111,28 @@ async function downloadFile(fileUrl) {
     }
 
     let downloadedLength = 0;
-    let lastProgress = 0;
 
     response.data.on("data", (chunk) => {
       downloadedLength += chunk.length;
       const progress = Math.round((downloadedLength / contentLength) * 100);
-      if (progress !== lastProgress && progress % 5 === 0) {
-        console.log(`Download progress: ${progress}%`);
-        lastProgress = progress;
-      }
+      readline.clearLine(process.stdout, 0);
+      readline.cursorTo(process.stdout, 0);
+      process.stdout.write(`Download: ${progress}%`);
     });
 
     await new Promise((resolve, reject) => {
       response.data.pipe(writer);
-      writer.on("finish", resolve);
+      writer.on("finish", () => {
+        process.stdout.write("\n"); // Nova linha ao finalizar
+        resolve();
+      });
       writer.on("error", reject);
     });
 
     console.log(`Download concluído: ${fileName}`);
     return { fileName, filePath };
   } catch (err) {
-    console.error("Erro durante o download:", err.message);
+    console.error("\nErro durante o download:", err.message);
     throw err;
   }
 }
@@ -156,20 +158,21 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
       supportsStreaming: true,
       progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
-        if (percent % 10 === 0) {
-          console.log(`Upload progress: ${percent}%`);
-        }
+        readline.clearLine(process.stdout, 0);
+        readline.cursorTo(process.stdout, 0);
+        process.stdout.write(`Upload: ${percent}%`);
       },
     };
 
     // Envia o arquivo
     await client.sendFile(chatId, fileOptions);
+    process.stdout.write("\n"); // Nova linha ao finalizar
     console.log(`Arquivo enviado com sucesso: ${fileName}`);
 
     // Remove o arquivo local
     fs.unlinkSync(filePath);
   } catch (error) {
-    console.error("Erro ao enviar arquivo:", error);
+    console.error("\nErro ao enviar arquivo:", error);
     throw new Error("Falha ao enviar arquivo para o Telegram");
   }
 }
