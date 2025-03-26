@@ -43,6 +43,16 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 }
 
 /**
+ * Gera um nome de arquivo único com timestamp
+ */
+function generateUniqueFilename(originalName, customName = null) {
+  const ext = path.extname(originalName);
+  const base = customName || path.basename(originalName, ext);
+  const timestamp = Date.now();
+  return `${base}_${timestamp}${ext}`;
+}
+
+/**
  * Inicia o cliente do Telegram
  */
 async function startClient() {
@@ -78,7 +88,7 @@ function isSupportedFileType(url) {
 /**
  * Baixa o arquivo da URL fornecida
  */
-async function downloadFile(fileUrl) {
+async function downloadFile(fileUrl, customName = null) {
   if (!isSupportedFileType(fileUrl)) {
     throw new Error("Tipo de arquivo não suportado");
   }
@@ -87,14 +97,16 @@ async function downloadFile(fileUrl) {
     const urlObj = new URL(fileUrl);
     const encodedFileName = urlObj.pathname;
     const decodedFileName = decodeURIComponent(encodedFileName);
-    let fileName = path.basename(decodedFileName);
+    let originalName = path.basename(decodedFileName);
 
     // Verifica se o nome do arquivo tem uma extensão
-    if (!path.extname(fileName)) {
-      fileName += ".mp4";
+    if (!path.extname(originalName)) {
+      originalName += ".mp4";
     }
 
-    const filePath = path.join(UPLOAD_DIR, fileName);
+    // Gera o nome final do arquivo
+    const finalName = generateUniqueFilename(originalName, customName);
+    const filePath = path.join(UPLOAD_DIR, finalName);
     const writer = fs.createWriteStream(filePath);
 
     const response = await axios({
@@ -129,8 +141,8 @@ async function downloadFile(fileUrl) {
       writer.on("error", reject);
     });
 
-    console.log(`Download concluído: ${fileName}`);
-    return { fileName, filePath };
+    console.log(`Download concluído: ${finalName}`);
+    return { fileName: finalName, filePath };
   } catch (err) {
     console.error("\nErro durante o download:", err.message);
     throw err;
@@ -179,7 +191,7 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
 
 // Rota de upload
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, threadId } = req.body;
+  const { fileUrl, chatId, threadId, customName } = req.body;
 
   if (!fileUrl || !chatId) {
     return res.status(400).json({ 
@@ -189,7 +201,7 @@ app.post("/upload", async (req, res) => {
 
   try {
     await startClient();
-    const { fileName, filePath } = await downloadFile(fileUrl);
+    const { fileName, filePath } = await downloadFile(fileUrl, customName);
     await uploadFile(filePath, fileName, chatId, threadId);
     
     res.status(200).json({ 
