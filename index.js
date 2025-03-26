@@ -42,33 +42,25 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR);
 }
 
-/**
- * Gera um nome de arquivo único com timestamp
+/*
+ * Gera um nome de arquivo único com timestamp (só adiciona timestamp se não houver customName)
  */
 function generateUniqueFilename(originalName, customName = null) {
   const ext = path.extname(originalName);
-  const base = customName || path.basename(originalName, ext);
+  
+  // Se tiver customName, usa exatamente o nome fornecido (sem timestamp)
+  if (customName) {
+    // Remove a extensão se já estiver no customName
+    const customWithoutExt = customName.endsWith(ext) 
+      ? customName.slice(0, -ext.length) 
+      : customName;
+    return `${customWithoutExt}${ext}`;
+  }
+  
+  // Se não tiver customName, gera com timestamp
+  const base = path.basename(originalName, ext);
   const timestamp = Date.now();
   return `${base}_${timestamp}${ext}`;
-}
-
-/**
- * Inicia o cliente do Telegram
- */
-async function startClient() {
-  try {
-    if (!client.connected) {
-      await client.start({
-        botAuthToken: botToken,
-        onError: (err) => console.error("Erro no cliente Telegram:", err),
-      });
-      console.log("Conectado ao Telegram");
-      fs.writeFileSync(sessionFile, client.session.save());
-    }
-  } catch (err) {
-    console.error("Falha ao iniciar cliente Telegram:", err);
-    throw err;
-  }
 }
 
 /**
