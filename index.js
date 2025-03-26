@@ -13,7 +13,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // Configurações de proxy para rate limiting
-app.set('trust proxy', 1); // Adiciona esta linha para resolver o erro do X-Forwarded-For
+app.set('trust proxy', 1);
 
 // Configurações de segurança
 app.use(helmet());
@@ -21,10 +21,10 @@ app.use(express.json({ limit: "10mb" }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // limite de 100 requisições por IP
-  standardHeaders: true, // Retorna info de rate limit nos headers
-  legacyHeaders: false, // Desabilita headers antigos
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use(limiter);
 
@@ -32,7 +32,7 @@ app.use(limiter);
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
 const botToken = process.env.BOT_TOKEN;
-const MAX_FILE_SIZE = 2000 * 1024 * 1024; // 2GB
+const MAX_FILE_SIZE = 2000 * 1024 * 1024;
 
 const sessionFile = "session.txt";
 let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
@@ -47,29 +47,21 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR);
 }
 
-/**
- * Gera um nome de arquivo único (sem timestamp quando tem customName)
- */
 function generateUniqueFilename(originalName, customName = null) {
   const ext = path.extname(originalName);
   
   if (customName) {
-    // Remove a extensão se já estiver no customName
     const customWithoutExt = customName.endsWith(ext) 
       ? customName.slice(0, -ext.length) 
       : customName;
     return `${customWithoutExt}${ext}`;
   }
   
-  // Se não tiver customName, gera com timestamp
   const base = path.basename(originalName, ext);
   const timestamp = Date.now();
   return `${base}_${timestamp}${ext}`;
 }
 
-/**
- * Inicia o cliente do Telegram (agora exportada para uso nas rotas)
- */
 async function startTelegramClient() {
   try {
     if (!client.connected) {
@@ -86,9 +78,6 @@ async function startTelegramClient() {
   }
 }
 
-/**
- * Verifica se a URL aponta para um tipo de arquivo suportado
- */
 function isSupportedFileType(url) {
   const supportedExtensions = [".mp4", ".mov", ".avi", ".mkv", ".pdf", ".zip"];
   try {
@@ -100,9 +89,6 @@ function isSupportedFileType(url) {
   }
 }
 
-/**
- * Baixa o arquivo da URL fornecida
- */
 async function downloadFile(fileUrl, customName = null) {
   if (!isSupportedFileType(fileUrl)) {
     throw new Error("Tipo de arquivo não suportado");
@@ -161,23 +147,16 @@ async function downloadFile(fileUrl, customName = null) {
   }
 }
 
-/**
- * Envia arquivo para o Telegram
- */
-/**
- * Envia arquivo para o Telegram (versão otimizada para posts e comentários em canais)
- */
 async function uploadFile(filePath, fileName, chatId, threadId = null, caption = null) {
   try {
     const chat = await client.getEntity(chatId);
     console.log(`Enviando arquivo para ${chat.title || chat.username}`);
 
-    // Usa a caption se existir, senão usa o fileName
     const finalCaption = caption || fileName;
 
     const fileOptions = {
       file: filePath,
-      caption: finalCaption,  // Aqui usamos a legenda personalizada
+      caption: finalCaption,
       supportsStreaming: true,
       ...(threadId && { replyTo: threadId }),
       progressCallback: (progress) => {
@@ -190,32 +169,17 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
 
     await client.sendFile(chatId, fileOptions);
     process.stdout.write("\n");
-    console.log(`Arquivo enviado com sucesso: ${finalCaption}`);
+    console.log(`✅ Arquivo enviado: ${finalCaption}`);
 
     fs.unlinkSync(filePath);
-  } catch (error) {
-    console.error("\nErro ao enviar arquivo:", error);
-    throw new Error("Falha ao enviar arquivo para o Telegram");
-  }
-}
-
-    // Envio efetivo
-    await client.sendFile(chatId, sendOptions);
-    process.stdout.write("\n");
-    console.log(`✅ Arquivo enviado: ${fileName}`);
-
-    // Limpeza
-    fs.unlinkSync(filePath);
-    
   } catch (error) {
     console.error("\n❌ Erro ao enviar arquivo:", error);
     throw new Error(`Falha no envio: ${error.message}`);
   }
 }
 
-// Rota de upload
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, threadId, customName, caption } = req.body; // Adicionamos o campo caption
+  const { fileUrl, chatId, threadId, customName, caption } = req.body;
 
   if (!fileUrl || !chatId) {
     return res.status(400).json({ 
@@ -226,7 +190,7 @@ app.post("/upload", async (req, res) => {
   try {
     await startTelegramClient();
     const { fileName, filePath } = await downloadFile(fileUrl, customName);
-    await uploadFile(filePath, fileName, chatId, threadId, caption); // Passamos a caption
+    await uploadFile(filePath, fileName, chatId, threadId, caption);
     
     res.status(200).json({ 
       success: true,
@@ -243,7 +207,6 @@ app.post("/upload", async (req, res) => {
   }
 });
 
-// Rota de saúde
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "healthy" });
 });
