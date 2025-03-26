@@ -167,20 +167,19 @@ async function downloadFile(fileUrl, customName = null) {
 /**
  * Envia arquivo para o Telegram (versão otimizada para posts e comentários em canais)
  */
-async function uploadFile(filePath, fileName, chatId, threadId = null) {
+async function uploadFile(filePath, fileName, chatId, threadId = null, caption = null) {
   try {
     const chat = await client.getEntity(chatId);
-    console.log(`Enviando arquivo para ${chat.title || chat.username}`, 
-                threadId ? `(comentário na thread ${threadId})` : '');
+    console.log(`Enviando arquivo para ${chat.title || chat.username}`);
 
-    // Configurações de envio inteligentes
-    const sendOptions = {
+    // Usa a caption se existir, senão usa o fileName
+    const finalCaption = caption || fileName;
+
+    const fileOptions = {
       file: filePath,
-      caption: fileName,
+      caption: finalCaption,  // Aqui usamos a legenda personalizada
       supportsStreaming: true,
-      // Envia como resposta se for thread/comentário
       ...(threadId && { replyTo: threadId }),
-      // Callback de progresso
       progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
         readline.clearLine(process.stdout, 0);
@@ -188,6 +187,17 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
         process.stdout.write(`Upload: ${percent}%`);
       },
     };
+
+    await client.sendFile(chatId, fileOptions);
+    process.stdout.write("\n");
+    console.log(`Arquivo enviado com sucesso: ${finalCaption}`);
+
+    fs.unlinkSync(filePath);
+  } catch (error) {
+    console.error("\nErro ao enviar arquivo:", error);
+    throw new Error("Falha ao enviar arquivo para o Telegram");
+  }
+}
 
     // Envio efetivo
     await client.sendFile(chatId, sendOptions);
@@ -205,7 +215,7 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
 
 // Rota de upload
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, threadId, customName } = req.body;
+  const { fileUrl, chatId, threadId, customName, caption } = req.body; // Adicionamos o campo caption
 
   if (!fileUrl || !chatId) {
     return res.status(400).json({ 
@@ -214,14 +224,15 @@ app.post("/upload", async (req, res) => {
   }
 
   try {
-    await startTelegramClient(); // Alterado de startClient para startTelegramClient
+    await startTelegramClient();
     const { fileName, filePath } = await downloadFile(fileUrl, customName);
-    await uploadFile(filePath, fileName, chatId, threadId);
+    await uploadFile(filePath, fileName, chatId, threadId, caption); // Passamos a caption
     
     res.status(200).json({ 
       success: true,
       message: "Arquivo enviado com sucesso!",
-      fileName 
+      fileName,
+      caption
     });
   } catch (error) {
     console.error("Erro no processamento:", error);
