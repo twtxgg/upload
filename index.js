@@ -171,58 +171,48 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
     console.log(`Enviando arquivo para ${chat.title || chat.username}`);
 
     const finalCaption = caption || fileName;
-    const fileExtension = path.extname(filePath).toLowerCase();
-    const isVideo = ['.mp4', '.mov', '.avi', '.mkv'].includes(fileExtension);
+    const isVideo = ['.mp4', '.mov', '.avi', '.mkv'].includes(path.extname(filePath).toLowerCase());
 
-    // Configuração para envio
-    const fileOptions = {
+    // 1. Envia mensagem de status
+    let statusMessage;
+    try {
+      statusMessage = await client.sendMessage(chatId, {
+        message: `📤 Enviando arquivo: ${finalCaption}`,
+        ...(threadId && { replyTo: threadId })
+      });
+    } catch (statusError) {
+      console.error("⚠️ Não foi possível enviar mensagem de status:", statusError);
+    }
+
+    // 2. Envia o arquivo principal
+    await client.sendFile(chatId, {
       file: filePath,
       caption: finalCaption,
-      ...(isVideo && {
-        supportsStreaming: true,
-        attributes: [{
-          _: 'documentAttributeVideo',
-          supportsStreaming: true,
-          duration: 0,
-          w: 0,
-          h: 0
-        }]
-      }),
+      supportsStreaming: isVideo, // Habilita streaming apenas para vídeos
       ...(threadId && { replyTo: threadId }),
       progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
         readline.clearLine(process.stdout, 0);
         readline.cursorTo(process.stdout, 0);
         process.stdout.write(`Upload: ${percent}%`);
-      },
-    };
+      }
+    });
 
-    // Envia o arquivo
-    await client.sendFile(chatId, fileOptions);
-    process.stdout.write("\n");
-    console.log(`✅ Arquivo enviado: ${finalCaption}`);
-
-    fs.unlinkSync(filePath);
-  } catch (error) {
-    console.error("\n❌ Erro ao enviar arquivo:", error);
-    
-    // Fallback para envio simples
-    if (error.message.includes('InputMediaUploadedDocument')) {
+    // 3. Remove mensagem de status (se existir)
+    if (statusMessage) {
       try {
-        console.log("Tentando enviar sem atributos de vídeo...");
-        await client.sendFile(chatId, {
-          file: filePath,
-          caption: finalCaption,
-          ...(threadId && { replyTo: threadId })
-        });
-        console.log("✅ Arquivo enviado (sem streaming)");
-        fs.unlinkSync(filePath);
-        return;
-      } catch (fallbackError) {
-        console.error("❌ Falha no envio alternativo:", fallbackError);
+        await client.deleteMessages(chatId, [statusMessage.id], { revoke: true });
+      } catch (deleteError) {
+        console.error("⚠️ Não foi possível remover mensagem de status:", deleteError);
       }
     }
+
+    console.log(`\n✅ Arquivo enviado: ${finalCaption}`);
+    fs.unlinkSync(filePath);
     
+  } catch (error) {
+    console.error("\n❌ Erro ao enviar arquivo:", error);
+    try { fs.unlinkSync(filePath); } catch {} // Garante remoção do arquivo temporário
     throw new Error(`Falha no envio: ${error.message}`);
   }
 }
