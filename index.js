@@ -151,39 +151,120 @@ async function downloadFile(fileUrl, customName = null) {
 /**
  * Envia arquivo para o Telegram com tratamento especial para vídeos
  */
+/**
+ * Envia arquivo para o Telegram com fallback alternativo
+ */
 async function uploadFile(filePath, fileName, chatId, threadId = null) {
+  let fileSent = false;
+  let lastError = null;
+  
+  // Primeira tentativa: método padrão
   try {
-    const isVideo = /\.(mp4|mov|avi|mkv)$/i.test(path.extname(fileName));
-    
-    // Configurações básicas do arquivo
-    const fileOptions = {
-      file: filePath,
-      caption: fileName,
-      progressCallback: (progress) => {
-        const percent = Math.round(progress * 100);
-        readline.clearLine(process.stdout, 0);
-        readline.cursorTo(process.stdout, 0);
-        process.stdout.write(`Upload: ${percent}%`);
-      },
-      workers: 1 // Adicionado para melhor estabilidade
-    };
+    await tryStandardUpload(filePath, fileName, chatId, threadId);
+    fileSent = true;
+  } catch (error) {
+    lastError = error;
+    console.error("Primeira tentativa falhou:", error.message);
+  }
 
-    // Configurações adicionais para vídeos
-    if (isVideo) {
-      fileOptions.supportsStreaming = true;
-      fileOptions.attributes = [{
-        _: 'documentAttributeVideo',
-        duration: 0, // O Telegram pode detectar automaticamente
-        w: 1280,     // Largura padrão
-        h: 720,      // Altura padrão
-        roundMessage: false,
-        supportsStreaming: true
-      }];
-      fileOptions.mimeType = 'video/mp4';
-    } else {
-      // Configurações para outros tipos de arquivo
-      fileOptions.forceDocument = true;
+  // Segunda tentativa: método alternativo se a primeira falhar
+  if (!fileSent) {
+    try {
+      await tryAlternativeUpload(filePath, fileName, chatId, threadId);
+      fileSent = true;
+    } catch (error) {
+      lastError = error;
+      console.error("Segunda tentativa falhou:", error.message);
     }
+  }
+
+  // Remove o arquivo local independentemente do resultado
+  try {
+    await fsp.unlink(filePath);
+  } catch (unlinkError) {
+    console.warn("Não foi possível remover o arquivo temporário:", unlinkError.message);
+  }
+
+  if (!fileSent) {
+    throw new Error(`Falha ao enviar arquivo após 2 tentativas: ${lastError.message}`);
+  }
+}
+
+/**
+ * Método padrão de upload
+ */
+async function tryStandardUpload(filePath, fileName, chatId, threadId) {
+  const isVideo = /\.(mp4|mov|avi|mkv)$/i.test(path.extname(fileName));
+  
+  const fileOptions = {
+    file: filePath,
+    caption: fileName,
+    workers: 1,
+    progressCallback: (progress) => {
+      const percent = Math.round(progress * 100);
+      readline.clearLine(process.stdout, 0);
+      readline.cursorTo(process.stdout, 0);
+      process.stdout.write(`Upload: ${percent}%`);
+    }
+  };
+
+  if (isVideo) {
+    fileOptions.supportsStreaming = true;
+    fileOptions.attributes = [{
+      _: 'documentAttributeVideo',
+      duration: 0,
+      w: 1280,
+      h: 720,
+      roundMessage: false,
+      supportsStreaming: true
+    }];
+    fileOptions.mimeType = 'video/mp4';
+  } else {
+    fileOptions.forceDocument = true;
+  }
+
+  await client.sendMessage(chatId, {
+    message: `📤 Enviando ${isVideo ? 'vídeo' : 'arquivo'}: ${fileName}`,
+    replyTo: threadId
+  });
+
+  await client.sendFile(chatId, fileOptions);
+  process.stdout.write("\n");
+  console.log(`Arquivo enviado com sucesso (método padrão): ${fileName}`);
+}
+
+/**
+ * Método alternativo de upload (fallback)
+ */
+async function tryAlternativeUpload(filePath, fileName, chatId, threadId) {
+  console.log("Tentando método alternativo de upload...");
+  
+  // Lê o arquivo como buffer
+  const fileBuffer = await fsp.readFile(filePath);
+  const fileStats = await fsp.stat(filePath);
+  
+  const fileOptions = {
+    file: new Uint8Array(fileBuffer),
+    fileSize: fileStats.size,
+    filename: fileName,
+    workers: 1,
+    progressCallback: (progress) => {
+      const percent = Math.round(progress * 100);
+      readline.clearLine(process.stdout, 0);
+      readline.cursorTo(process.stdout, 0);
+      process.stdout.write(`Upload (alternativo): ${percent}%`);
+    }
+  };
+
+  await client.sendMessage(chatId, {
+    message: `🔄 Tentando método alternativo para enviar: ${fileName}`,
+    replyTo: threadId
+  });
+
+  await client.sendFile(chatId, fileOptions);
+  process.stdout.write("\n");
+  console.log(`Arquivo enviado com sucesso (método alternativo): ${fileName}`);
+}
 
     // Verifica se o arquivo existe antes de enviar
     try {
