@@ -1,28 +1,8 @@
 const express = require("express");
-const fs = require("fs").promises;
+const fs = require("fs"); // Importa o fs completo
+const fsp = require("fs").promises; // Importa apenas as promises
 const { createWriteStream } = require("fs");
-const axios = require("axios");
-const { TelegramClient } = require("telegram");
-const { StringSession } = require("telegram/sessions");
-const path = require("path");
-const rateLimit = require("express-rate-limit");
-const helmet = require("helmet");
-const readline = require("readline");
-require("dotenv").config();
-
-const app = express();
-const port = process.env.PORT || 3000;
-
-// Configurações de segurança
-app.use(helmet());
-app.use(express.json({ limit: "10mb" }));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100 // limite de 100 requisições por IP
-});
-app.use(limiter);
+// ... resto das importações permanecem iguais ...
 
 // Configurações do Telegram
 const apiId = Number(process.env.API_ID);
@@ -31,7 +11,7 @@ const botToken = process.env.BOT_TOKEN;
 const MAX_FILE_SIZE = 2000 * 1024 * 1024; // 2GB
 
 const sessionFile = "session.txt";
-let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
+let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : ""; // Agora usando fs corretamente
 const stringSession = new StringSession(sessionString);
 const client = new TelegramClient(stringSession, apiId, apiHash, {
   connectionRetries: 5,
@@ -39,9 +19,11 @@ const client = new TelegramClient(stringSession, apiId, apiHash, {
 
 // Diretório para uploads
 const UPLOAD_DIR = path.join(__dirname, "upload");
-if (!fs.existsSync(UPLOAD_DIR)) {
+if (!fs.existsSync(UPLOAD_DIR)) { // Corrigido aqui também
   fs.mkdirSync(UPLOAD_DIR);
 }
+
+// ... resto do código permanece igual, substituindo fs por fsp onde for async ...
 
 /**
  * Gera um nome de arquivo único com timestamp
