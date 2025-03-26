@@ -164,17 +164,23 @@ async function downloadFile(fileUrl, customName = null) {
 /**
  * Envia arquivo para o Telegram
  */
+/**
+ * Envia arquivo para o Telegram (versão otimizada para posts e comentários em canais)
+ */
 async function uploadFile(filePath, fileName, chatId, threadId = null) {
   try {
     const chat = await client.getEntity(chatId);
-    console.log(`Enviando arquivo para ${chat.title || chat.username}`);
+    console.log(`Enviando arquivo para ${chat.title || chat.username}`, 
+                threadId ? `(comentário na thread ${threadId})` : '');
 
-    // Envia como resposta à thread/comentário se threadId existir
+    // Configurações de envio inteligentes
     const sendOptions = {
       file: filePath,
       caption: fileName,
       supportsStreaming: true,
-      replyTo: threadId || undefined, // Importante: undefined se threadId for null
+      // Envia como resposta se for thread/comentário
+      ...(threadId && { replyTo: threadId }),
+      // Callback de progresso
       progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
         readline.clearLine(process.stdout, 0);
@@ -183,14 +189,17 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
       },
     };
 
+    // Envio efetivo
     await client.sendFile(chatId, sendOptions);
     process.stdout.write("\n");
-    console.log(`Arquivo enviado com sucesso: ${fileName}`);
+    console.log(`✅ Arquivo enviado: ${fileName}`);
 
+    // Limpeza
     fs.unlinkSync(filePath);
+    
   } catch (error) {
-    console.error("\nErro ao enviar arquivo:", error);
-    throw new Error("Falha ao enviar arquivo para o Telegram");
+    console.error("\n❌ Erro ao enviar arquivo:", error);
+    throw new Error(`Falha no envio: ${error.message}`);
   }
 }
 
