@@ -1,108 +1,328 @@
-const telegramAuthToken = `7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE`;
-const webhookEndpoint = "/endpoint";
-const nodeServerUrl = "http://ec2-18-220-113-247.us-east-2.compute.amazonaws.com:3000"; // Removido ec2-user@
+const express = require("express");
+const fs = require("fs");
+const axios = require("axios");
+const { TelegramClient } = require("telegram");
+const { StringSession } = require("telegram/sessions");
+const path = require("path");
+const rateLimit = require("express-rate-limit");
+const helmet = require("helmet");
+const readline = require("readline");
+require("dotenv").config();
 
-addEventListener("fetch", (event) => {
-    event.respondWith(handleIncomingRequest(event));
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Configurações de segurança
+app.use(helmet());
+app.use(express.json({ limit: "10mb" }));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 100 // limite de 100 requisições por IP
+});
+app.use(limiter);
+
+// Configurações do Telegram
+const apiId = Number(process.env.API_ID);
+const apiHash = process.env.API_HASH;
+const botToken = process.env.BOT_TOKEN;
+const MAX_FILE_SIZE = 2000 * 1024 * 1024; // 2GB
+
+const sessionFile = "session.txt";
+let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
+const stringSession = new StringSession(sessionString);
+const client = new TelegramClient(stringSession, apiId, apiHash, {
+  connectionRetries: 5,
 });
 
-async function handleIncomingRequest(event) {
-    let url = new URL(event.request.url);
-    let path = url.pathname;
-    let method = event.request.method;
-    let workerUrl = `${url.protocol}//${url.host}`;
+// Diretório para uploads
+const UPLOAD_DIR = path.join(__dirname, "upload");
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR);
+}
 
-    if (method === "POST" && path === webhookEndpoint) {
-        const update = await event.request.json();
-        console.log("Mensagem recebida do Telegram:", JSON.stringify(update));
-        event.waitUntil(processUpdate(update));
-        return new Response("Ok");
-    } else if (method === "GET" && path === "/configure-webhook") {
-        const url = `https://api.telegram.org/bot${telegramAuthToken}/setWebhook?url=${workerUrl}${webhookEndpoint}`;
-        const response = await fetch(url);
+/**
+ * Gera um nome de arquivo único com timestamp
+ */
+function generateUniqueFilename(originalName, customName = null) {
+  const ext = path.extname(originalName);
+  const base = customName || path.basename(originalName, ext);
+  const timestamp = Date.now();
+  return `${base}_${timestamp}${ext}`;
+}
 
-        if (response.ok) {
-            return new Response("Webhook set successfully", { status: 200 });
-        } else {
-            return new Response("Failed to set webhook", { status: response.status });
+/**
+ * Inicia o cliente do Telegram
+ */
+async function startClient() {
+  try {
+    if (!client.connected) {
+      await client.start({
+        botAuthToken: botToken,
+        onError: (err) => console.error("Erro no cliente Telegram:", err),
+      });
+      console.log("Conectado ao Telegram");
+      fs.writeFileSync(sessionFile, client.session.save());
+    }
+  } catch (err) {
+    console.error("Falha ao iniciar cliente Telegram:", err);
+    throw err;
+  }
+}
+
+/**
+ * Verifica se a URL aponta para um tipo de arquivo suportado
+ */
+function isSupportedFileType(url) {
+  const supportedExtensions = [".mp4", ".mov", ".avi", ".mkv", ".pdf", ".zip"];
+  try {
+    const urlObj = new URL(url);
+    const extension = path.extname(urlObj.pathname.toLowerCase());
+    return supportedExtensions.includes(extension);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Baixa o arquivo da URL fornecida
+ */
+async function downloadFile(fileUrl, customName = null) {
+  if (!isSupportedFileType(fileUrl)) {
+    throw new Error("Tipo de arquivo não suportado");
+  }
+
+  try {
+    const urlObj = new URL(fileUrl);
+    const encodedFileName = urlObj.pathname;
+    const decodedFileName = decodeURIComponent(encodedFileName);
+    let originalName = path.basename(decodedFileName);
+
+    // Verifica se o nome do arquivo tem uma extensão
+    if (!path.extname(originalName)) {
+      originalName += ".mp4";
+    }
+
+    // Gera o nome final do arquivo
+    const finalName = generateUniqueFilename(originalName, customName);
+    const filePath = path.join(UPLOAD_DIR, finalName);
+    const writer = fs.createWriteStream(filePath);
+
+    const response = await axios({
+      method: "get",
+      url: fileUrl,
+      responseType: "stream",
+      maxContentLength: MAX_FILE_SIZE,
+    });
+
+    // Verifica o tamanho do arquivo
+    const contentLength = response.headers["content-length"];
+    if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) {
+      throw new Error(`Arquivo muito grande (limite: ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
+    }
+
+    let downloadedLength = 0;
+
+    response.data.on("data", (chunk) => {
+      downloadedLength += chunk.length;
+      const progress = Math.round((downloadedLength / contentLength) * 100);
+      readline.clearLine(process.stdout, 0);
+      readline.cursorTo(process.stdout, 0);
+      process.stdout.write(`Download: ${progress}%`);
+    });
+
+    await new Promise((resolve, reject) => {
+      response.data.pipe(writer);
+      writer.on("finish", () => {
+        process.stdout.write("\n"); // Nova linha ao finalizar
+        resolve();
+      });
+      writer.on("error", reject);
+    });
+
+    console.log(`Download concluído: ${finalName}`);
+    return { fileName: finalName, filePath };
+  } catch (err) {
+    console.error("\nErro durante o download:", err.message);
+    throw err;
+  }
+}
+
+/**
+ * Envia arquivo para o Telegram
+ */
+async function uploadFile(filePath, fileName, chatId, threadId = null) {
+  try {
+    // 1. Verificar e corrigir metadados
+    await ensureVideoMetadata(filePath);
+    
+    // 2. Verificar restrições de tamanho/resolução
+    await checkVideoConstraints(filePath);
+    
+    // 3. Obter metadados atualizados
+    const metadata = await new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(filePath, (err, data) => {
+        if (err) reject(err);
+        else resolve(data);
+      });
+    });
+
+    const videoStream = metadata.streams.find(s => s.codec_type === 'video');
+    
+    // Envia mensagem de início
+    await client.sendMessage(chatId, {
+      message: `📤 Enviando arquivo: ${fileName}`,
+      replyTo: threadId
+    });
+
+    // Configurações otimizadas para vídeo
+    const fileOptions = {
+      file: filePath,
+      caption: fileName,
+      supportsStreaming: true,
+      attributes: [
+        {
+          _: 'documentAttributeVideo',
+          duration: metadata.format.duration || 0,
+          w: videoStream?.width || 1280,
+          h: videoStream?.height || 720,
+          roundMessage: false,
+          supportsStreaming: true
         }
-    } else {
-        return new Response("Not found", { status: 404 });
+      ],
+      mimeType: 'video/mp4',
+      progressCallback: (progress) => {
+        const percent = Math.round(progress * 100);
+        readline.clearLine(process.stdout, 0);
+        readline.cursorTo(process.stdout, 0);
+        process.stdout.write(`Upload: ${percent}%`);
+      },
+    };
+
+    // Envia o arquivo
+    await client.sendFile(chatId, fileOptions);
+    process.stdout.write("\n");
+    console.log(`Arquivo enviado com sucesso: ${fileName}`);
+
+    // Remove o arquivo local
+    fs.unlinkSync(filePath);
+  } catch (error) {
+    console.error("\nErro ao enviar arquivo:", error);
+    throw new Error("Falha ao enviar arquivo para o Telegram");
+  }
+}
+    // Envia o arquivo
+    await client.sendFile(chatId, fileOptions);
+    process.stdout.write("\n"); // Nova linha ao finalizar
+    console.log(`Arquivo enviado com sucesso: ${fileName}`);
+
+    // Remove o arquivo local
+    fs.unlinkSync(filePath);
+  } catch (error) {
+    console.error("\nErro ao enviar arquivo:", error);
+    throw new Error("Falha ao enviar arquivo para o Telegram");
+  }
+}
+
+/**
+ * Processa comandos recebidos via mensagem
+ */
+async function processCommand(command, chatId) {
+  try {
+    // Comando /rename - formato: /rename novo_nome url_do_arquivo
+    if (command.startsWith('/rename')) {
+      const parts = command.split(' ');
+      if (parts.length < 3) {
+        await client.sendMessage(chatId, {
+          message: "Formato incorreto. Use: /rename novo_nome url_do_arquivo"
+        });
+        return;
+      }
+      
+      const customName = parts[1];
+      const fileUrl = parts.slice(2).join(' ');
+      
+      await client.sendMessage(chatId, {
+        message: `⏳ Iniciando download e renomeando para: ${customName}`
+      });
+      
+      const { fileName, filePath } = await downloadFile(fileUrl, customName);
+      await uploadFile(filePath, fileName, chatId);
+      
+      await client.sendMessage(chatId, {
+        message: `✅ Arquivo renomeado e enviado com sucesso como: ${customName}`
+      });
     }
+  } catch (error) {
+    console.error("Erro ao processar comando:", error);
+    await client.sendMessage(chatId, {
+      message: `❌ Erro: ${error.message}`
+    });
+  }
 }
 
-async function processUpdate(update) {
-    if ("message" in update) {
-        const chatId = update.message.chat.id;
-        const userText = update.message.text;
-        let threadId = update.message.message_thread_id;
+// Rota de upload
+app.post("/upload", async (req, res) => {
+  const { fileUrl, chatId, threadId, customName } = req.body;
 
-        console.log("chatId:", chatId, "threadId:", threadId, "userText:", userText);
+  if (!fileUrl || !chatId) {
+    return res.status(400).json({ 
+      error: "URL do arquivo e ID do chat são obrigatórios" 
+    });
+  }
 
-        if (isValidUrl(userText)) {
-            try {
-                const body = threadId ? JSON.stringify({ fileUrl: userText, chatId: chatId, threadId: threadId }) : JSON.stringify({ fileUrl: userText, chatId: chatId });
-                console.log("Corpo da requisição para o Node.js:", JSON.stringify(body));
+  try {
+    await startClient();
+    const { fileName, filePath } = await downloadFile(fileUrl, customName);
+    await uploadFile(filePath, fileName, chatId, threadId);
+    
+    res.status(200).json({ 
+      success: true,
+      message: "Arquivo enviado com sucesso!",
+      fileName 
+    });
+  } catch (error) {
+    console.error("Erro no processamento:", error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message || "Erro ao processar o arquivo"
+    });
+  }
+});
 
-                const response = await fetch(`${nodeServerUrl}/upload`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-Requested-with": "XMLHttpRequest",
-                    },
-                    body: body,
-                });
-                console.log("Resposta do Node.js:", JSON.stringify(response));
-            } catch (error) {
-                console.error("Erro ao enviar requisição:", error);
-                const responseText = `Error uploading file: ${error.message}`;
-                await sendMessageToBot(chatId, responseText);
-            }
-        } else if (
-            !(
-                update.message.document ||
-                update.message.text.startsWith("Uploading file") ||
-                update.message.text.startsWith("Downloading file")
-            )
-        ) {
-            const responseText = "Invalid URL!";
-            const sentMessage = await sendMessageToBot(chatId, responseText);
+// Rota para processar comandos via HTTP (para integração com webhooks)
+app.post("/command", async (req, res) => {
+  const { command, chatId } = req.body;
 
-            console.log("Resposta do sendMessage:", JSON.stringify(sentMessage)); // Log da resposta do sendMessage
+  if (!command || !chatId) {
+    return res.status(400).json({ 
+      error: "Comando e ID do chat são obrigatórios" 
+    });
+  }
 
-            if (sentMessage && sentMessage.result && sentMessage.result.message_id) {
-                const messageIdToDelete = sentMessage.result.message_id;
+  try {
+    await startClient();
+    await processCommand(command, chatId);
+    
+    res.status(200).json({ 
+      success: true,
+      message: "Comando processado com sucesso!"
+    });
+  } catch (error) {
+    console.error("Erro no processamento:", error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message || "Erro ao processar o comando"
+    });
+  }
+});
 
-                console.log("messageID para deletar:", messageIdToDelete); // Log do messageIdToDelete
+// Rota de saúde
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "healthy" });
+});
 
-                setTimeout(() => {
-                    console.log("Timeout executado"); // Log do timeout
-                    deleteMessageFromBot(chatId, messageIdToDelete);
-                }, 3000);
-            }
-        }
-    }
-}
-
-function isValidUrl(string) {
-    try {
-        new URL(string);
-        return true;
-    } catch (_) {
-        return false;
-    }
-}
-
-async function sendMessageToBot(chatId, message) {
-    const url = `https://api.telegram.org/bot${telegramAuthToken}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(message)}`;
-    const response = await fetch(url);
-    return response.json();
-}
-
-async function deleteMessageFromBot(chatId, messageId) {
-    console.log("Deletando mensagem:", chatId, messageId); // Log da chamada da função
-    const url = `https://api.telegram.org/bot${telegramAuthToken}/deleteMessage?chat_id=${chatId}&message_id=${messageId}`;
-    const response = await fetch(url);
-    const responseJson = await response.json();
-    console.log("Resposta do deleteMessage:", JSON.stringify(responseJson)); // Log da resposta da API
-}
+app.listen(port, () => {
+  console.log(`Servidor rodando na porta ${port}`);
+});
