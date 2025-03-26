@@ -1,5 +1,6 @@
 const express = require("express");
 const axios = require("axios");
+const fs = require("fs"); // Adicionada esta linha para corrigir o erro
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const readlineSync = require("readline-sync");
