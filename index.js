@@ -175,10 +175,22 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
 
     const finalCaption = caption || fileName;
 
+    // Detectar o tipo de arquivo para definir parâmetros específicos
+    const fileExtension = path.extname(filePath).toLowerCase();
+    const isVideo = ['.mp4', '.mov', '.avi', '.mkv'].includes(fileExtension);
+
     const fileOptions = {
       file: filePath,
       caption: finalCaption,
-      supportsStreaming: true,
+      ...(isVideo && {
+        supportsStreaming: true,  // Habilita streaming para vídeos
+        attributes: [{
+          _: 'documentAttributeVideo',
+          duration: 0,           // Será preenchido automaticamente
+          w: 0,                  // Largura (será detectada)
+          h: 0                   // Altura (será detectada)
+        }]
+      }),
       ...(threadId && { replyTo: threadId }),
       progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
