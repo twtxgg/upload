@@ -39,6 +39,11 @@ async function downloadFile(fileUrl) {
     const decodedFileName = decodeURIComponent(encodedFileName);
     fileName = path.basename(decodedFileName);
 
+    // Verifica se o nome do arquivo tem uma extensão
+    if (!path.extname(fileName)) {
+      fileName += ".mp4"; // Adiciona a extensão .mp4 se não houver extensão
+    }
+
     const writer = fs.createWriteStream(path.join(__dirname, "upload", fileName));
 
     const response = await axios({
