@@ -177,10 +177,20 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
     const fileExtension = path.extname(filePath).toLowerCase();
     const isVideo = ['.mp4', '.mov', '.avi', '.mkv'].includes(fileExtension);
 
-    // Primeiro envie o arquivo sem atributos especiais
-    const result = await client.sendFile(chatId, {
+    // Configuração para envio de vídeo com streaming
+    const fileOptions = {
       file: filePath,
       caption: finalCaption,
+      ...(isVideo && {
+        supportsStreaming: true,
+        attributes: [{
+          _: 'documentAttributeVideo',
+          supportsStreaming: true,
+          duration: 0,
+          w: 0,
+          h: 0
+        }]
+      }),
       ...(threadId && { replyTo: threadId }),
       progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
@@ -188,23 +198,39 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
         readline.cursorTo(process.stdout, 0);
         process.stdout.write(`Upload: ${percent}%`);
       },
-    });
+    };
 
-    // Se for vídeo, edite a mensagem para adicionar atributos de streaming
-    if (isVideo && result) {
-      await client.editMessage(chatId, {
-        message: result.id,
-        attributes: [
-          {
-            _: 'documentAttributeVideo',
-            supportsStreaming: true,
-            duration: 0,
-            w: 0,
-            h: 0
-          }
-        ]
-      });
+    // Envia o arquivo
+    await client.sendFile(chatId, fileOptions);
+    process.stdout.write("\n");
+    console.log(`✅ Arquivo enviado: ${finalCaption}`);
+
+    fs.unlinkSync(filePath);
+    
+  } catch (error) {
+    console.error("\n❌ Erro ao enviar arquivo:", error);
+    
+    // Verifica se o erro é específico sobre atributos de vídeo
+    if (error.message.includes('InputMediaUploadedDocument')) {
+      // Tenta enviar novamente sem os atributos específicos
+      try {
+        console.log("Tentando enviar sem atributos de vídeo...");
+        await client.sendFile(chatId, {
+          file: filePath,
+          caption: finalCaption,
+          ...(threadId && { replyTo: threadId })
+        });
+        console.log("✅ Arquivo enviado (sem streaming)");
+        fs.unlinkSync(filePath);
+        return;
+      } catch (fallbackError) {
+        console.error("❌ Falha no envio alternativo:", fallbackError);
+      }
     }
+    
+    throw new Error(`Falha no envio: ${error.message}`);
+  }
+}
 
     process.stdout.write("\n");
     console.log(`✅ Arquivo enviado: ${finalCaption}`);
