@@ -177,11 +177,10 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
     const fileExtension = path.extname(filePath).toLowerCase();
     const isVideo = ['.mp4', '.mov', '.avi', '.mkv'].includes(fileExtension);
 
-    const fileOptions = {
+    // Primeiro envie o arquivo sem atributos especiais
+    const result = await client.sendFile(chatId, {
       file: filePath,
       caption: finalCaption,
-      supportsStreaming: isVideo,
-      forceDocument: !isVideo,
       ...(threadId && { replyTo: threadId }),
       progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
@@ -189,22 +188,24 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
         readline.cursorTo(process.stdout, 0);
         process.stdout.write(`Upload: ${percent}%`);
       },
-    };
+    });
 
-    // Configuração específica para vídeos
-    if (isVideo) {
-      fileOptions.attributes = [
-        {
-          _: 'documentAttributeVideo',
-          supportsStreaming: true,
-          duration: 0, // Será preenchido automaticamente
-          w: 0,       // Largura automática
-          h: 0        // Altura automática
-        }
-      ];
+    // Se for vídeo, edite a mensagem para adicionar atributos de streaming
+    if (isVideo && result) {
+      await client.editMessage(chatId, {
+        message: result.id,
+        attributes: [
+          {
+            _: 'documentAttributeVideo',
+            supportsStreaming: true,
+            duration: 0,
+            w: 0,
+            h: 0
+          }
+        ]
+      });
     }
 
-    await client.sendFile(chatId, fileOptions);
     process.stdout.write("\n");
     console.log(`✅ Arquivo enviado: ${finalCaption}`);
 
