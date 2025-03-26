@@ -174,7 +174,7 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
     const fileExtension = path.extname(filePath).toLowerCase();
     const isVideo = ['.mp4', '.mov', '.avi', '.mkv'].includes(fileExtension);
 
-    // Configuração inicial para envio
+    // Configuração para envio
     const fileOptions = {
       file: filePath,
       caption: finalCaption,
@@ -197,7 +197,7 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
       },
     };
 
-    // Envia o arquivo uma única vez com todos os atributos
+    // Envia o arquivo
     await client.sendFile(chatId, fileOptions);
     process.stdout.write("\n");
     console.log(`✅ Arquivo enviado: ${finalCaption}`);
@@ -206,7 +206,7 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
   } catch (error) {
     console.error("\n❌ Erro ao enviar arquivo:", error);
     
-    // Fallback para envio simples se houver erro com atributos de vídeo
+    // Fallback para envio simples
     if (error.message.includes('InputMediaUploadedDocument')) {
       try {
         console.log("Tentando enviar sem atributos de vídeo...");
@@ -223,16 +223,6 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
       }
     }
     
-    throw new Error(`Falha no envio: ${error.message}`);
-  }
-}
-
-    process.stdout.write("\n");
-    console.log(`✅ Arquivo enviado: ${finalCaption}`);
-
-    fs.unlinkSync(filePath);
-  } catch (error) {
-    console.error("\n❌ Erro ao enviar arquivo:", error);
     throw new Error(`Falha no envio: ${error.message}`);
   }
 }
