@@ -26,7 +26,7 @@ app.use(limiter);
 // Configurações do Telegram
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const botToken = process.env.BOT_TOKEN;
+const botToken = process.env.BOT_TOKEN || "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE";
 const MAX_FILE_SIZE = 2000 * 1024 * 1024; // 2GB
 
 const sessionFile = "session.txt";
@@ -181,13 +181,48 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
     console.log(`Arquivo enviado com sucesso: ${fileName}`);
 
     fs.unlinkSync(filePath);
+    return true;
   } catch (error) {
     console.error("\nErro ao enviar arquivo:", error);
     throw new Error("Falha ao enviar arquivo para o Telegram");
   }
 }
 
-// Rota de upload
+/**
+ * Processa mensagens recebidas via webhook
+ */
+async function handleBotMessage(update) {
+  try {
+    const message = update.message;
+    if (!message) return;
+
+    const chatId = message.chat.id;
+    const text = message.text?.trim() || "";
+
+    // Comando /start
+    if (text === "/start") {
+      await client.sendMessage(chatId, {
+        message: "🤖 *Bot de Upload de Arquivos*\n\nEnvie um link direto para um arquivo e eu farei o upload para este chat!",
+        parseMode: "markdown"
+      });
+      return;
+    }
+
+    // Comando /help
+    if (text === "/help") {
+      await client.sendMessage(chatId, {
+        message: "🛠 *Ajuda*\n\n• Envie um link direto para arquivos\n• Você poderá renomear antes do upload\n• Formatos suportados: MP4, PDF, ZIP, etc.",
+        parseMode: "markdown"
+      });
+      return;
+    }
+
+  } catch (error) {
+    console.error("Erro no handleBotMessage:", error);
+  }
+}
+
+// Rota para upload via API
 app.post("/upload", async (req, res) => {
   const { fileUrl, chatId, customName } = req.body;
 
@@ -216,29 +251,24 @@ app.post("/upload", async (req, res) => {
   }
 });
 
-// Rota de saúde
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "healthy" });
-});
-
-// Adicione esta rota antes do app.listen()
+// Rota para webhook do Telegram
 app.post("/webhook", async (req, res) => {
   try {
-    const { message } = req.body;
-    
-    if (!message) {
-      return res.status(400).json({ error: "Mensagem inválida" });
-    }
-
-    console.log("Mensagem recebida:", message.text);
-    
-    res.status(200).json({ status: "received" });
+    await handleBotMessage(req.body);
+    res.status(200).json({ status: "ok" });
   } catch (error) {
     console.error("Erro no webhook:", error);
     res.status(500).json({ error: "Erro interno" });
   }
 });
 
+// Rota de saúde
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "healthy" });
+});
+
 app.listen(port, () => {
   console.log(`Servidor rodando na porta ${port}`);
+  console.log(`Webhook: http://localhost:${port}/webhook`);
+  console.log(`Upload API: http://localhost:${port}/upload`);
 });
