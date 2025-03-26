@@ -84,16 +84,13 @@ async function isSupportedFileType(url) {
     const urlObj = new URL(url);
     const extension = path.extname(urlObj.pathname.toLowerCase());
     
-    // Se tiver extensão conhecida, aceita
     if (supportedExtensions.includes(extension)) {
       return true;
     }
     
-    // Se não tiver extensão, verifica o header Content-Type
     const response = await axios.head(url);
     const contentType = response.headers['content-type'];
     
-    // Tipos MIME suportados
     const supportedMimeTypes = [
       'video/mp4',
       'video/quicktime',
@@ -177,20 +174,9 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
     const fileExtension = path.extname(filePath).toLowerCase();
     const isVideo = ['.mp4', '.mov', '.avi', '.mkv'].includes(fileExtension);
 
-    // Configuração para envio de vídeo com streaming
     const fileOptions = {
       file: filePath,
       caption: finalCaption,
-      ...(isVideo && {
-        supportsStreaming: true,
-        attributes: [{
-          _: 'documentAttributeVideo',
-          supportsStreaming: true,
-          duration: 0,
-          w: 0,
-          h: 0
-        }]
-      }),
       ...(threadId && { replyTo: threadId }),
       progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
@@ -200,37 +186,29 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
       },
     };
 
-    // Envia o arquivo
-    await client.sendFile(chatId, fileOptions);
-    process.stdout.write("\n");
-    console.log(`✅ Arquivo enviado: ${finalCaption}`);
-
-    fs.unlinkSync(filePath);
+    // Envia primeiro sem atributos específicos
+    const message = await client.sendFile(chatId, fileOptions);
     
-  } catch (error) {
-    console.error("\n❌ Erro ao enviar arquivo:", error);
-    
-    // Verifica se o erro é específico sobre atributos de vídeo
-    if (error.message.includes('InputMediaUploadedDocument')) {
-      // Tenta enviar novamente sem os atributos específicos
+    // Se for vídeo, edita para adicionar atributos
+    if (isVideo && message) {
       try {
-        console.log("Tentando enviar sem atributos de vídeo...");
-        await client.sendFile(chatId, {
+        await client.editMessage(chatId, {
+          message: message.id,
           file: filePath,
-          caption: finalCaption,
-          ...(threadId && { replyTo: threadId })
+          attributes: [
+            {
+              _: 'documentAttributeVideo',
+              supportsStreaming: true,
+              duration: 0,
+              w: 0,
+              h: 0
+            }
+          ]
         });
-        console.log("✅ Arquivo enviado (sem streaming)");
-        fs.unlinkSync(filePath);
-        return;
-      } catch (fallbackError) {
-        console.error("❌ Falha no envio alternativo:", fallbackError);
+      } catch (editError) {
+        console.error("❌ Erro ao editar mensagem (o arquivo foi enviado):", editError);
       }
     }
-    
-    throw new Error(`Falha no envio: ${error.message}`);
-  }
-}
 
     process.stdout.write("\n");
     console.log(`✅ Arquivo enviado: ${finalCaption}`);
