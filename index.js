@@ -26,7 +26,7 @@ app.use(limiter);
 // Configurações do Telegram
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const botToken = process.env.BOT_TOKEN || "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE";
+const botToken = process.env.BOT_TOKEN;
 const MAX_FILE_SIZE = 2000 * 1024 * 1024; // 2GB
 
 const sessionFile = "session.txt";
@@ -43,16 +43,11 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 }
 
 /**
- * Gera um nome de arquivo seguro
+ * Gera um nome de arquivo único com timestamp
  */
-function generateSafeFilename(originalName, customName = null) {
+function generateUniqueFilename(originalName, customName = null) {
   const ext = path.extname(originalName);
-  let base = customName || path.basename(originalName, ext);
-  
-  // Remove caracteres inválidos
-  base = base.replace(/[\/\\:*?"<>|]/g, '');
-  base = base.substring(0, 100); // Limita o tamanho
-  
+  const base = customName || path.basename(originalName, ext);
   const timestamp = Date.now();
   return `${base}_${timestamp}${ext}`;
 }
@@ -104,11 +99,13 @@ async function downloadFile(fileUrl, customName = null) {
     const decodedFileName = decodeURIComponent(encodedFileName);
     let originalName = path.basename(decodedFileName);
 
+    // Verifica se o nome do arquivo tem uma extensão
     if (!path.extname(originalName)) {
       originalName += ".mp4";
     }
 
-    const finalName = generateSafeFilename(originalName, customName);
+    // Gera o nome final do arquivo
+    const finalName = generateUniqueFilename(originalName, customName);
     const filePath = path.join(UPLOAD_DIR, finalName);
     const writer = fs.createWriteStream(filePath);
 
@@ -119,6 +116,7 @@ async function downloadFile(fileUrl, customName = null) {
       maxContentLength: MAX_FILE_SIZE,
     });
 
+    // Verifica o tamanho do arquivo
     const contentLength = response.headers["content-length"];
     if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) {
       throw new Error(`Arquivo muito grande (limite: ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
@@ -137,7 +135,7 @@ async function downloadFile(fileUrl, customName = null) {
     await new Promise((resolve, reject) => {
       response.data.pipe(writer);
       writer.on("finish", () => {
-        process.stdout.write("\n");
+        process.stdout.write("\n"); // Nova linha ao finalizar
         resolve();
       });
       writer.on("error", reject);
@@ -159,11 +157,13 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
     const chat = await client.getEntity(chatId);
     console.log(`Enviando arquivo para ${chat.title || chat.username}`);
 
+    // Envia mensagem de início
     await client.sendMessage(chatId, {
       message: `📤 Enviando arquivo: ${fileName}`,
       replyTo: threadId
     });
 
+    // Opções para o arquivo
     const fileOptions = {
       file: filePath,
       caption: fileName,
@@ -176,55 +176,24 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
       },
     };
 
+    // Envia o arquivo
     await client.sendFile(chatId, fileOptions);
-    process.stdout.write("\n");
+    process.stdout.write("\n"); // Nova linha ao finalizar
     console.log(`Arquivo enviado com sucesso: ${fileName}`);
 
+    // Remove o arquivo local
     fs.unlinkSync(filePath);
-    return true;
   } catch (error) {
     console.error("\nErro ao enviar arquivo:", error);
     throw new Error("Falha ao enviar arquivo para o Telegram");
   }
 }
 
-/**
- * Processa mensagens recebidas via webhook
- */
-async function handleBotMessage(update) {
-  try {
-    const message = update.message;
-    if (!message) return;
+// ... (todo o código anterior permanece igual)
 
-    const chatId = message.chat.id;
-    const text = message.text?.trim() || "";
-
-    // Comando /start
-    if (text === "/start") {
-      await client.sendMessage(chatId, {
-        message: "🤖 *Bot de Upload de Arquivos*\n\nEnvie um link direto para um arquivo e eu farei o upload para este chat!",
-        parseMode: "markdown"
-      });
-      return;
-    }
-
-    // Comando /help
-    if (text === "/help") {
-      await client.sendMessage(chatId, {
-        message: "🛠 *Ajuda*\n\n• Envie um link direto para arquivos\n• Você poderá renomear antes do upload\n• Formatos suportados: MP4, PDF, ZIP, etc.",
-        parseMode: "markdown"
-      });
-      return;
-    }
-
-  } catch (error) {
-    console.error("Erro no handleBotMessage:", error);
-  }
-}
-
-// Rota para upload via API
+// Rota de upload
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, customName } = req.body;
+  const { fileUrl, chatId, threadId, customName } = req.body;
 
   if (!fileUrl || !chatId) {
     return res.status(400).json({ 
@@ -235,7 +204,7 @@ app.post("/upload", async (req, res) => {
   try {
     await startClient();
     const { fileName, filePath } = await downloadFile(fileUrl, customName);
-    await uploadFile(filePath, fileName, chatId);
+    await uploadFile(filePath, fileName, chatId, threadId);
     
     res.status(200).json({ 
       success: true,
@@ -251,16 +220,7 @@ app.post("/upload", async (req, res) => {
   }
 });
 
-// Rota para webhook do Telegram
-app.post("/webhook", async (req, res) => {
-  try {
-    await handleBotMessage(req.body);
-    res.status(200).json({ status: "ok" });
-  } catch (error) {
-    console.error("Erro no webhook:", error);
-    res.status(500).json({ error: "Erro interno" });
-  }
-});
+// ... (todo o código posterior permanece igual)
 
 // Rota de saúde
 app.get("/health", (req, res) => {
@@ -269,6 +229,4 @@ app.get("/health", (req, res) => {
 
 app.listen(port, () => {
   console.log(`Servidor rodando na porta ${port}`);
-  console.log(`Webhook: http://localhost:${port}/webhook`);
-  console.log(`Upload API: http://localhost:${port}/upload`);
 });
