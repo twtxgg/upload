@@ -189,8 +189,6 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
   }
 }
 
-// ... (todo o código anterior permanece igual)
-
 // Rota de upload
 app.post("/upload", async (req, res) => {
   const { fileUrl, chatId, threadId, customName } = req.body;
@@ -219,8 +217,6 @@ app.post("/upload", async (req, res) => {
     });
   }
 });
-
-// ... (todo o código posterior permanece igual)
 
 // Rota de saúde
 app.get("/health", (req, res) => {
