@@ -1,6 +1,6 @@
 const express = require("express");
 const axios = require("axios");
-const fs = require("fs"); // Adicionada esta linha para corrigir o erro
+const fs = require("fs"); // Adicionada esta linha para corrigir o erro "fs is not defined"
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const readlineSync = require("readline-sync");
@@ -50,10 +50,10 @@ async function streamFileToChat(fileUrl, chatId) {
         const mimeType = response.headers["content-type"] || "application/octet-stream";
 
         await client.sendFile(chatId, {
-            file: response.data, // Diretamente o fluxo de dados
+            file: response.data, // Fluxo de dados diretamente, sem conversão
             caption: fileName,
             mimeType: mimeType,
-            forceDocument: false, // Ou true para forçar como documento
+            forceDocument: false,
             progressCallback: (progress) => {
                 console.log(`Streaming: ${Math.round(progress * 100)}%`);
             },
