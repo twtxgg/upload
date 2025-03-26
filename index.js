@@ -221,6 +221,24 @@ app.get("/health", (req, res) => {
   res.status(200).json({ status: "healthy" });
 });
 
+// Adicione esta rota antes do app.listen()
+app.post("/webhook", async (req, res) => {
+  try {
+    const { message } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ error: "Mensagem inválida" });
+    }
+
+    console.log("Mensagem recebida:", message.text);
+    
+    res.status(200).json({ status: "received" });
+  } catch (error) {
+    console.error("Erro no webhook:", error);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
 app.listen(port, () => {
   console.log(`Servidor rodando na porta ${port}`);
 });
