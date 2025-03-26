@@ -1,8 +1,29 @@
 const express = require("express");
-const fs = require("fs"); // Importa o fs completo
-const fsp = require("fs").promises; // Importa apenas as promises
+const fs = require("fs");
+const fsp = require("fs").promises;
 const { createWriteStream } = require("fs");
-// ... resto das importações permanecem iguais ...
+const axios = require("axios");
+const { TelegramClient } = require("telegram");
+const { StringSession } = require("telegram/sessions"); // Correção aqui
+const path = require("path");
+const rateLimit = require("express-rate-limit");
+const helmet = require("helmet");
+const readline = require("readline");
+require("dotenv").config();
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Configurações de segurança
+app.use(helmet());
+app.use(express.json({ limit: "10mb" }));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 100 // limite de 100 requisições por IP
+});
+app.use(limiter);
 
 // Configurações do Telegram
 const apiId = Number(process.env.API_ID);
@@ -11,19 +32,17 @@ const botToken = process.env.BOT_TOKEN;
 const MAX_FILE_SIZE = 2000 * 1024 * 1024; // 2GB
 
 const sessionFile = "session.txt";
-let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : ""; // Agora usando fs corretamente
-const stringSession = new StringSession(sessionString);
+let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
+const stringSession = new StringSession(sessionString); // Agora deve funcionar
 const client = new TelegramClient(stringSession, apiId, apiHash, {
   connectionRetries: 5,
 });
 
 // Diretório para uploads
 const UPLOAD_DIR = path.join(__dirname, "upload");
-if (!fs.existsSync(UPLOAD_DIR)) { // Corrigido aqui também
+if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR);
 }
-
-// ... resto do código permanece igual, substituindo fs por fsp onde for async ...
 
 /**
  * Gera um nome de arquivo único com timestamp
@@ -46,7 +65,7 @@ async function startClient() {
         onError: (err) => console.error("Erro no cliente Telegram:", err),
       });
       console.log("Conectado ao Telegram");
-      await fs.writeFile(sessionFile, client.session.save());
+      await fsp.writeFile(sessionFile, client.session.save()); // Usando fsp
     }
   } catch (err) {
     console.error("Falha ao iniciar cliente Telegram:", err);
@@ -116,13 +135,11 @@ async function downloadFile(fileUrl, customName = null) {
     return { fileName: finalName, filePath };
     
   } catch (err) {
-    // Fecha o writer se existir
     if (writer) writer.end();
     
-    // Tenta remover arquivo parcialmente baixado
     if (writer && writer.path) {
       try {
-        await fs.unlink(writer.path).catch(() => {});
+        await fsp.unlink(writer.path).catch(() => {});
       } catch {}
     }
     
@@ -138,7 +155,6 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
   try {
     const isVideo = /\.(mp4|mov|avi|mkv)$/i.test(path.extname(fileName));
     
-    // Configurações básicas do arquivo
     const fileOptions = {
       file: filePath,
       caption: fileName,
@@ -150,34 +166,30 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
       },
     };
 
-    // Configurações adicionais para vídeos
     if (isVideo) {
       fileOptions.supportsStreaming = true;
       fileOptions.attributes = [{
         _: 'documentAttributeVideo',
-        duration: 0, // Duração será detectada automaticamente pelo Telegram
-        w: 1280,     // Largura padrão
-        h: 720,      // Altura padrão
+        duration: 0,
+        w: 1280,
+        h: 720,
         roundMessage: false,
         supportsStreaming: true
       }];
       fileOptions.mimeType = 'video/mp4';
     }
 
-    // Envia mensagem de início
     await client.sendMessage(chatId, {
       message: `📤 Enviando ${isVideo ? 'vídeo' : 'arquivo'}: ${fileName}`,
       replyTo: threadId
     });
 
-    // Envia o arquivo
     await client.sendFile(chatId, fileOptions);
     process.stdout.write("\n");
     console.log(`Arquivo enviado com sucesso: ${fileName}`);
 
-    // Remove o arquivo local
     try {
-      await fs.unlink(filePath);
+      await fsp.unlink(filePath);
     } catch (unlinkError) {
       console.warn("Aviso: Não foi possível remover o arquivo temporário:", unlinkError.message);
     }
@@ -185,9 +197,8 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
   } catch (error) {
     console.error("\nErro ao enviar arquivo:", error);
     
-    // Tenta remover o arquivo temporário mesmo em caso de erro
     try {
-      await fs.unlink(filePath).catch(() => {});
+      await fsp.unlink(filePath).catch(() => {});
     } catch {}
     
     throw new Error("Falha ao enviar arquivo para o Telegram");
