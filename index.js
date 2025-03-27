@@ -4,15 +4,39 @@ const axios = require("axios");
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const path = require("path");
+const rateLimit = require("express-rate-limit");
+const helmet = require("helmet");
+const readline = require("readline");
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
 require("dotenv").config();
+
+// Configura o FFmpeg
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
 const port = process.env.PORT || 3000;
-app.use(express.json());
 
+// Configurações de segurança
+app.use(helmet());
+app.use(express.json({ limit: "10mb" }));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 100 // limite de 100 requisições por IP
+});
+app.use(limiter);
+
+// Configurações do Telegram
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
-const botToken = "7824135861:AAEi3-nXSnhXs7WusqZd-vPElh1I7WfvdCE"; // Token do bot
+const botToken = process.env.BOT_TOKEN;
+const MAX_FILE_SIZE = 2000 * 1024 * 1024; // 2GB
+
+// Configurações de upload
+const PART_SIZE = 512 * 1024; // 512KB (tamanho recomendado para partes)
+const MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10MB (tamanho máximo do buffer)
 
 const sessionFile = "session.txt";
 let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
@@ -21,110 +45,252 @@ const client = new TelegramClient(stringSession, apiId, apiHash, {
   connectionRetries: 5,
 });
 
-let fileName;
-
-async function startClient() {
-  await client.start({
-    botAuthToken: botToken, // Autenticação via token do bot
-    onError: (err) => console.error(err),
-  });
-  console.log("Conectado ao Telegram");
-  fs.writeFileSync(sessionFile, client.session.save());
+// Diretório para uploads
+const UPLOAD_DIR = path.join(__dirname, "upload");
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR);
 }
 
-async function downloadFile(fileUrl) {
+/**
+ * Gera um nome de arquivo único com timestamp
+ */
+function generateUniqueFilename(originalName, customName = null) {
+  const ext = path.extname(originalName);
+  const base = customName || path.basename(originalName, ext);
+  const timestamp = Date.now();
+  return `${base}_${timestamp}${ext}`;
+}
+
+/**
+ * Inicia o cliente do Telegram
+ */
+async function startClient() {
+  try {
+    if (!client.connected) {
+      await client.start({
+        botAuthToken: botToken,
+        onError: (err) => console.error("Erro no cliente Telegram:", err),
+      });
+      console.log("Conectado ao Telegram");
+      fs.writeFileSync(sessionFile, client.session.save());
+    }
+  } catch (err) {
+    console.error("Falha ao iniciar cliente Telegram:", err);
+    throw err;
+  }
+}
+
+/**
+ * Verifica se a URL aponta para um tipo de arquivo suportado
+ */
+function isSupportedFileType(url) {
+  const supportedExtensions = [".mp4", ".mov", ".avi", ".mkv", ".pdf", ".zip"];
+  try {
+    const urlObj = new URL(url);
+    const extension = path.extname(urlObj.pathname.toLowerCase());
+    return supportedExtensions.includes(extension);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Baixa o arquivo da URL fornecida
+ */
+async function downloadFile(fileUrl, customName = null) {
+  if (!isSupportedFileType(fileUrl)) {
+    throw new Error("Tipo de arquivo não suportado");
+  }
+
   try {
     const urlObj = new URL(fileUrl);
     const encodedFileName = urlObj.pathname;
     const decodedFileName = decodeURIComponent(encodedFileName);
-    fileName = path.basename(decodedFileName);
+    let originalName = path.basename(decodedFileName);
 
-    const writer = fs.createWriteStream(path.join(__dirname, "upload", fileName));
+    // Verifica se o nome do arquivo tem uma extensão
+    if (!path.extname(originalName)) {
+      originalName += ".mp4";
+    }
+
+    // Gera o nome final do arquivo
+    const finalName = generateUniqueFilename(originalName, customName);
+    const filePath = path.join(UPLOAD_DIR, finalName);
+    const writer = fs.createWriteStream(filePath);
 
     const response = await axios({
       method: "get",
       url: fileUrl,
       responseType: "stream",
+      maxContentLength: MAX_FILE_SIZE,
     });
 
-    response.data.pipe(writer);
+    // Verifica o tamanho do arquivo
+    const contentLength = response.headers["content-length"];
+    if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) {
+      throw new Error(`Arquivo muito grande (limite: ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
+    }
 
-    return new Promise((resolve, reject) => {
-      writer.on("finish", () => resolve(fileName));
-      writer.on("error", (err) => {
-        reject(err);
+    let downloadedLength = 0;
+
+    response.data.on("data", (chunk) => {
+      downloadedLength += chunk.length;
+      const progress = Math.round((downloadedLength / contentLength) * 100);
+      readline.clearLine(process.stdout, 0);
+      readline.cursorTo(process.stdout, 0);
+      process.stdout.write(`Download: ${progress}%`);
+    });
+
+    await new Promise((resolve, reject) => {
+      response.data.pipe(writer);
+      writer.on("finish", () => {
+        process.stdout.write("\n"); // Nova linha ao finalizar
+        resolve();
       });
+      writer.on("error", reject);
     });
+
+    console.log(`Download concluído: ${finalName}`);
+    return { fileName: finalName, filePath };
   } catch (err) {
-    console.error("Erro durante a requisição axios:", err.message);
+    console.error("\nErro durante o download:", err.message);
     throw err;
   }
 }
 
-async function uploadFile(filePath, chatId, threadId) {
+/**
+ * Obtém metadados do vídeo usando FFprobe
+ */
+async function getVideoMetadata(filePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) return reject(err);
+      resolve(metadata);
+    });
+  });
+}
+
+/**
+ * Envia arquivo para o Telegram com streaming otimizado
+ */
+async function uploadFile(filePath, fileName, chatId, threadId = null) {
   try {
-    const me = await client.getMe();
-    console.log("Informação do bot:", me);
-
     const chat = await client.getEntity(chatId);
-    console.log("Informação do chat:", chat);
+    console.log(`Enviando arquivo para ${chat.title || chat.username}`);
 
-    // Faz o upload do arquivo com `upload_web_get_file` e `partSize`
-    const uploadedFile = await client.uploadFile({
-      file: filePath,
-      useWeb: true, // Ativar envio por servidores web
-      partSize: 512 * 1024, // Tamanho do fragmento configurado para 512 KB
+    // Envia mensagem de início
+    await client.sendMessage(chatId, {
+      message: `📤 Enviando arquivo: ${fileName}`,
+      replyTo: threadId
     });
 
-    if (!uploadedFile) {
-      throw new Error("Falha ao processar o arquivo para upload.");
+    // Obter metadados do vídeo se for um arquivo de vídeo
+    let duration, width, height;
+    const ext = path.extname(filePath).toLowerCase();
+    const isVideo = ['.mp4', '.mov', '.avi', '.mkv'].includes(ext);
+    
+    if (isVideo) {
+      try {
+        const metadata = await getVideoMetadata(filePath);
+        duration = metadata.format.duration;
+        if (metadata.streams && metadata.streams[0]) {
+          width = metadata.streams[0].width;
+          height = metadata.streams[0].height;
+        }
+      } catch (err) {
+        console.log('Não foi possível obter metadados do vídeo:', err.message);
+      }
     }
 
-    let fileOptions = {
-      file: uploadedFile, // Arquivo carregado via uploadFile
+    // Configurações avançadas de upload
+    const fileStats = fs.statSync(filePath);
+    const fileSize = fileStats.size;
+    const totalParts = Math.ceil(fileSize / PART_SIZE);
+
+    // Opções para o arquivo com controle de partes
+    const fileOptions = {
+      file: filePath,
       caption: fileName,
-      mimeType: "video/mp4", // Certifique-se do tipo MIME correto
-      supportsStreaming: true, // Habilita streaming de vídeo
+      supportsStreaming: true,
+      fileSize: fileSize,
+      partSizeKb: Math.floor(PART_SIZE / 1024),
+      forceBigFile: true, // Força o uso de upload.saveBigFilePart
+      workers: 4, // Número de workers para upload paralelo
+      attributes: isVideo ? [
+        {
+          _: 'documentAttributeVideo',
+          duration: duration || 0,
+          w: width || 1280,
+          h: height || 720,
+          supportsStreaming: true,
+          roundMessage: false,
+          nosound: false
+        }
+      ] : [],
+      progressCallback: async (progress) => {
+        const percent = Math.round(progress * 100);
+        readline.clearLine(process.stdout, 0);
+        readline.cursorTo(process.stdout, 0);
+        process.stdout.write(`Upload: ${percent}%`);
+        
+        // Atualiza a mensagem de progresso no chat a cada 5%
+        if (percent % 5 === 0) {
+          try {
+            await client.editMessage(chatId, {
+              message: `📤 Enviando arquivo: ${fileName} (${percent}%)`,
+            });
+          } catch (e) {
+            console.log('Não foi possível atualizar a mensagem de progresso:', e.message);
+          }
+        }
+      },
     };
 
-    if (threadId) {
-      fileOptions.replyTo = threadId;
-    }
-
-    console.log("Enviando arquivo para chatId:", chatId);
+    // Envia o arquivo com controle de partes
     await client.sendFile(chatId, fileOptions);
+    process.stdout.write("\n"); // Nova linha ao finalizar
+    console.log(`Arquivo enviado com sucesso: ${fileName}`);
 
-    console.log(`\nArquivo ${filePath} enviado com sucesso!`);
-    fs.unlinkSync(filePath); // Remove o arquivo local após o envio
-    return;
+    // Remove o arquivo local
+    fs.unlinkSync(filePath);
   } catch (error) {
-    console.error("Erro ao enviar arquivo:", error);
+    console.error("\nErro ao enviar arquivo:", error);
     throw new Error("Falha ao enviar arquivo para o Telegram");
   }
 }
 
+// Rota de upload
 app.post("/upload", async (req, res) => {
-  const { fileUrl, chatId, threadId } = req.body;
+  const { fileUrl, chatId, threadId, customName } = req.body;
 
   if (!fileUrl || !chatId) {
-    return res.status(400).json({ error: "URL do arquivo e ID do chat são obrigatórios" });
+    return res.status(400).json({ 
+      error: "URL do arquivo e ID do chat são obrigatórios" 
+    });
   }
 
   try {
     await startClient();
-    const filePath = await downloadFile(fileUrl);
-    const chat = await client.getEntity(chatId);
-
-    if (chat.className === "User" || chat.className === "Chat" || chat.className === "Channel") {
-      await uploadFile(path.join(__dirname, "upload", filePath), chatId, threadId);
-      res.status(200).json({ message: "Arquivo enviado com sucesso!" });
-    } else {
-      res.status(400).json({ error: "Chat ID inválido" });
-    }
+    const { fileName, filePath } = await downloadFile(fileUrl, customName);
+    await uploadFile(filePath, fileName, chatId, threadId);
+    
+    res.status(200).json({ 
+      success: true,
+      message: "Arquivo enviado com sucesso!",
+      fileName 
+    });
   } catch (error) {
-    console.error("Erro:", error);
-    res.status(500).json({ error: error.message });
+    console.error("Erro no processamento:", error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message || "Erro ao processar o arquivo"
+    });
   }
+});
+
+// Rota de saúde
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "healthy" });
 });
 
 app.listen(port, () => {
