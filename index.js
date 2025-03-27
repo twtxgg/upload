@@ -10,13 +10,14 @@ const readline = require("readline");
 require("dotenv").config();
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3001; // Changed default port to avoid conflicts
 
-// Configurações do servidor
+// Configurações de proxy e segurança
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(express.json({ limit: "10mb" }));
 
+// Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -25,7 +26,7 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Configurações do Telegram
+// Telegram Client Setup
 const apiId = Number(process.env.API_ID);
 const apiHash = process.env.API_HASH;
 const botToken = process.env.BOT_TOKEN;
@@ -38,23 +39,21 @@ const client = new TelegramClient(stringSession, apiId, apiHash, {
   connectionRetries: 5,
 });
 
-// Diretório para uploads
+// Upload Directory Setup
 const UPLOAD_DIR = path.join(__dirname, "upload");
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR);
 }
 
-// Funções auxiliares
+// Helper Functions
 function generateUniqueFilename(originalName, customName = null) {
   const ext = path.extname(originalName);
-  
   if (customName) {
     const customWithoutExt = customName.endsWith(ext) 
       ? customName.slice(0, -ext.length) 
       : customName;
     return `${customWithoutExt}${ext}`;
   }
-  
   const base = path.basename(originalName, ext);
   const timestamp = Date.now();
   return `${base}_${timestamp}${ext}`;
@@ -65,13 +64,13 @@ async function startTelegramClient() {
     if (!client.connected) {
       await client.start({
         botAuthToken: botToken,
-        onError: (err) => console.error("Erro no cliente Telegram:", err),
+        onError: (err) => console.error("Telegram client error:", err),
       });
-      console.log("Conectado ao Telegram");
+      console.log("Connected to Telegram");
       fs.writeFileSync(sessionFile, client.session.save());
     }
   } catch (err) {
-    console.error("Falha ao iniciar cliente Telegram:", err);
+    console.error("Failed to start Telegram client:", err);
     throw err;
   }
 }
@@ -81,14 +80,10 @@ async function isSupportedFileType(url) {
   try {
     const urlObj = new URL(url);
     const extension = path.extname(urlObj.pathname.toLowerCase());
-    
-    if (supportedExtensions.includes(extension)) {
-      return true;
-    }
+    if (supportedExtensions.includes(extension)) return true;
     
     const response = await axios.head(url);
-    const contentType = response.headers['content-type'];
-    
+    const contentType = response.headers['content-type'] || '';
     return [
       'video/mp4',
       'video/quicktime',
@@ -96,7 +91,6 @@ async function isSupportedFileType(url) {
       'video/x-matroska',
       'video/webm'
     ].some(mime => contentType.includes(mime));
-    
   } catch {
     return false;
   }
@@ -104,18 +98,13 @@ async function isSupportedFileType(url) {
 
 async function downloadFile(fileUrl, customName = null) {
   if (!(await isSupportedFileType(fileUrl))) {
-    throw new Error("Tipo de arquivo não suportado");
+    throw new Error("Unsupported file type");
   }
 
   try {
     const urlObj = new URL(fileUrl);
-    const encodedFileName = urlObj.pathname;
-    const decodedFileName = decodeURIComponent(encodedFileName);
-    let originalName = path.basename(decodedFileName);
-
-    if (!path.extname(originalName)) {
-      originalName += ".mp4";
-    }
+    let originalName = path.basename(decodeURIComponent(urlObj.pathname));
+    if (!path.extname(originalName)) originalName += ".mp4";
 
     const finalName = generateUniqueFilename(originalName, customName);
     const filePath = path.join(UPLOAD_DIR, finalName);
@@ -126,11 +115,12 @@ async function downloadFile(fileUrl, customName = null) {
       url: fileUrl,
       responseType: "stream",
       maxContentLength: MAX_FILE_SIZE,
+      timeout: 300000,
     });
 
     const contentLength = response.headers["content-length"];
     if (contentLength && parseInt(contentLength) > MAX_FILE_SIZE) {
-      throw new Error(`Arquivo muito grande (limite: ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
+      throw new Error(`File too large (limit: ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
     }
 
     let downloadedLength = 0;
@@ -151,27 +141,43 @@ async function downloadFile(fileUrl, customName = null) {
       writer.on("error", reject);
     });
 
-    console.log(`Download concluído: ${finalName}`);
+    console.log(`Download complete: ${finalName}`);
     return { fileName: finalName, filePath };
   } catch (err) {
-    console.error("\nErro durante o download:", err.message);
+    console.error("\nDownload error:", err.message);
     throw err;
   }
 }
 
 async function uploadFile(filePath, fileName, chatId, threadId = null, caption = null) {
   try {
+    if (!fs.existsSync(filePath)) {
+      throw new Error("File not found");
+    }
+
     const chat = await client.getEntity(chatId);
-    console.log(`Enviando arquivo para ${chat.title || chat.username}`);
+    console.log(`Sending to ${chat.title || chat.username}`);
 
     const finalCaption = caption || fileName;
     const fileExt = path.extname(filePath).toLowerCase();
     const isVideo = ['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(fileExt);
 
-    // Configurações de upload
+    // Status message
+    let statusMessage;
+    try {
+      statusMessage = await client.sendMessage(chatId, {
+        message: `📤 Uploading ${isVideo ? 'video' : 'file'}: ${finalCaption}`,
+        ...(threadId && { replyTo: threadId })
+      });
+    } catch (statusError) {
+      console.error("Status message error:", statusError);
+    }
+
+    // Upload with appropriate options
     const uploadOptions = {
       file: filePath,
       caption: finalCaption,
+      workers: 1,
       ...(threadId && { replyTo: threadId }),
       progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
@@ -181,62 +187,45 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
       }
     };
 
-    // Configurações específicas para vídeos
     if (isVideo) {
       uploadOptions.supportsStreaming = true;
-      uploadOptions.mimeType = 'video/mp4';
-      uploadOptions.forceDocument = false;
-      
-      // Atributos do vídeo para melhor streaming
       uploadOptions.attributes = [{
         _: 'documentAttributeVideo',
         supportsStreaming: true,
-        duration: 0,  // Pode ser obtido com ffprobe se necessário
-        w: 0,         // Largura (pode ser obtida com ffprobe)
-        h: 0          // Altura (pode ser obtida com ffprobe)
+        duration: 0,
+        w: 0,
+        h: 0
       }];
     }
 
-    // Envia mensagem de status
-    let statusMessage;
-    try {
-      statusMessage = await client.sendMessage(chatId, {
-        message: `📤 Enviando ${isVideo ? 'vídeo' : 'arquivo'}: ${finalCaption}`,
-        ...(threadId && { replyTo: threadId })
-      });
-    } catch (statusError) {
-      console.error("⚠️ Não foi possível enviar mensagem de status:", statusError);
-    }
-
-    // Envia o arquivo principal
     await client.sendFile(chatId, uploadOptions);
 
-    // Remove mensagem de status (se existir)
+    // Clean up status message
     if (statusMessage) {
       try {
         await client.deleteMessages(chatId, [statusMessage.id], { revoke: true });
       } catch (deleteError) {
-        console.error("⚠️ Não foi possível remover mensagem de status:", deleteError);
+        console.error("Failed to delete status message:", deleteError);
       }
     }
 
-    console.log(`\n✅ ${isVideo ? 'Vídeo' : 'Arquivo'} enviado: ${finalCaption}`);
+    console.log(`\n✅ ${isVideo ? 'Video' : 'File'} sent: ${finalCaption}`);
     fs.unlinkSync(filePath);
     
   } catch (error) {
-    console.error("\n❌ Erro ao enviar arquivo:", error);
+    console.error("\n❌ Upload failed:", error);
     try { fs.unlinkSync(filePath); } catch {}
-    throw new Error(`Falha no envio: ${error.message}`);
+    throw new Error(`Upload failed: ${error.message}`);
   }
 }
 
-// Rotas
+// Routes
 app.post("/upload", async (req, res) => {
   const { fileUrl, chatId, threadId, customName, caption } = req.body;
 
   if (!fileUrl || !chatId) {
     return res.status(400).json({ 
-      error: "URL do arquivo e ID do chat são obrigatórios" 
+      error: "File URL and chat ID are required" 
     });
   }
 
@@ -247,24 +236,39 @@ app.post("/upload", async (req, res) => {
     
     res.status(200).json({ 
       success: true,
-      message: "Arquivo enviado com sucesso!",
+      message: "File sent successfully!",
       fileName,
       caption,
       isVideo: ['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(path.extname(filePath).toLowerCase())
     });
   } catch (error) {
-    console.error("Erro no processamento:", error);
+    console.error("Processing error:", error);
     res.status(500).json({ 
       success: false,
-      error: error.message || "Erro ao processar o arquivo"
+      error: error.message || "File processing error"
     });
   }
 });
 
 app.get("/health", (req, res) => {
-  res.status(200).json({ status: "healthy" });
+  res.status(200).json({ 
+    status: "healthy",
+    timestamp: new Date().toISOString() 
+  });
 });
 
-app.listen(port, () => {
-  console.log(`Servidor rodando na porta ${port}`);
+// Error handling for EADDRINUSE
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Server running on port ${port}`);
+}).on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${port} is already in use`);
+    process.exit(1);
+  }
+});
+
+// Clean exit handler
+process.on('SIGINT', () => {
+  console.log('\nShutting down server...');
+  process.exit();
 });
