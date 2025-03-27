@@ -36,7 +36,6 @@ const MAX_FILE_SIZE = 2000 * 1024 * 1024; // 2GB
 
 // Configurações de upload
 const PART_SIZE = 512 * 1024; // 512KB (tamanho recomendado para partes)
-const MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10MB (tamanho máximo do buffer)
 
 const sessionFile = "session.txt";
 let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
@@ -185,68 +184,62 @@ async function uploadFile(filePath, fileName, chatId, threadId = null) {
     });
 
     // Obter metadados do vídeo se for um arquivo de vídeo
-    let duration, width, height;
+    let attributes = [];
     const ext = path.extname(filePath).toLowerCase();
     const isVideo = ['.mp4', '.mov', '.avi', '.mkv'].includes(ext);
     
     if (isVideo) {
       try {
         const metadata = await getVideoMetadata(filePath);
-        duration = metadata.format.duration;
-        if (metadata.streams && metadata.streams[0]) {
-          width = metadata.streams[0].width;
-          height = metadata.streams[0].height;
-        }
-      } catch (err) {
-        console.log('Não foi possível obter metadados do vídeo:', err.message);
-      }
-    }
+        const duration = metadata.format.duration || 0;
+        const width = (metadata.streams && metadata.streams[0] && metadata.streams[0].width) || 1280;
+        const height = (metadata.streams && metadata.streams[0] && metadata.streams[0].height) || 720;
 
-    // Configurações avançadas de upload
-    const fileStats = fs.statSync(filePath);
-    const fileSize = fileStats.size;
-    const totalParts = Math.ceil(fileSize / PART_SIZE);
-
-    // Opções para o arquivo com controle de partes
-    const fileOptions = {
-      file: filePath,
-      caption: fileName,
-      supportsStreaming: true,
-      fileSize: fileSize,
-      partSizeKb: Math.floor(PART_SIZE / 1024),
-      forceBigFile: true, // Força o uso de upload.saveBigFilePart
-      workers: 4, // Número de workers para upload paralelo
-      attributes: isVideo ? [
-        {
+        attributes = [{
           _: 'documentAttributeVideo',
-          duration: duration || 0,
-          w: width || 1280,
-          h: height || 720,
+          duration: Math.floor(duration),
+          w: width,
+          h: height,
           supportsStreaming: true,
           roundMessage: false,
           nosound: false
-        }
-      ] : [],
-      progressCallback: async (progress) => {
+        }];
+      } catch (err) {
+        console.log('Não foi possível obter metadados do vídeo:', err.message);
+        // Atributos padrão para vídeo se não conseguir obter metadados
+        attributes = [{
+          _: 'documentAttributeVideo',
+          duration: 0,
+          w: 1280,
+          h: 720,
+          supportsStreaming: true,
+          roundMessage: false,
+          nosound: false
+        }];
+      }
+    }
+
+    // Configurações de upload simplificadas
+    const fileStats = fs.statSync(filePath);
+    const fileSize = fileStats.size;
+
+    // Opções para o arquivo
+    const fileOptions = {
+      file: filePath,
+      workers: 4,
+      partSizeKb: Math.floor(PART_SIZE / 1024),
+      attributes: attributes,
+      caption: fileName,
+      forceBig: fileSize > 10 * 1024 * 1024, // Usar upload grande para arquivos >10MB
+      progressCallback: (progress) => {
         const percent = Math.round(progress * 100);
         readline.clearLine(process.stdout, 0);
         readline.cursorTo(process.stdout, 0);
         process.stdout.write(`Upload: ${percent}%`);
-        
-        // Atualiza a mensagem de progresso no chat a cada 5%
-        if (percent % 5 === 0) {
-          try {
-            await client.editMessage(chatId, {
-              message: `📤 Enviando arquivo: ${fileName} (${percent}%)`,
-            });
-          } catch (e) {
-            console.log('Não foi possível atualizar a mensagem de progresso:', e.message);
-          }
-        }
       },
     };
 
-    // Envia o arquivo com controle de partes
+    // Envia o arquivo
     await client.sendFile(chatId, fileOptions);
     process.stdout.write("\n"); // Nova linha ao finalizar
     console.log(`Arquivo enviado com sucesso: ${fileName}`);
