@@ -7,27 +7,22 @@ const path = require("path");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
 const readline = require("readline");
-const { exec, execSync } = require("child_process");
+const ffmpeg = require('fluent-ffmpeg');
+const { execSync } = require('child_process');
 require("dotenv").config();
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Verifica se FFmpeg está disponível
-let ffmpegAvailable = false;
+// Configuração do FFmpeg
 try {
   execSync('ffmpeg -version', { stdio: 'ignore' });
-  ffmpegAvailable = true;
-  console.log('FFmpeg está disponível no sistema');
+  ffmpeg.setFfmpegPath(execSync('which ffmpeg').toString().trim());
+  ffmpeg.setFfprobePath(execSync('which ffprobe').toString().trim());
+  console.log('✅ FFmpeg configurado com sucesso');
 } catch (e) {
-  console.warn('FFmpeg não está instalado. Alguns recursos de vídeo podem não funcionar corretamente');
+  console.warn('⚠️ FFmpeg não encontrado. Recursos de vídeo limitados');
 }
-
-// Configurações do Telegram
-const apiId = Number(process.env.API_ID);
-const apiHash = process.env.API_HASH;
-const botToken = process.env.BOT_TOKEN;
-const MAX_FILE_SIZE = 2000 * 1024 * 1024; // 2GB
 
 // Configurações do servidor
 app.set('trust proxy', 1);
@@ -42,7 +37,12 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Sessão do Telegram
+// Configurações do Telegram
+const apiId = Number(process.env.API_ID);
+const apiHash = process.env.API_HASH;
+const botToken = process.env.BOT_TOKEN;
+const MAX_FILE_SIZE = 2000 * 1024 * 1024; // 2GB
+
 const sessionFile = "session.txt";
 let sessionString = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : "";
 const stringSession = new StringSession(sessionString);
@@ -54,6 +54,24 @@ const client = new TelegramClient(stringSession, apiId, apiHash, {
 const UPLOAD_DIR = path.join(__dirname, "upload");
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR);
+}
+
+// Função para gerar miniaturas
+async function generateThumbnail(videoPath, thumbPath) {
+  return new Promise((resolve) => {
+    ffmpeg(videoPath)
+      .screenshots({
+        timestamps: ['00:00:01'],
+        filename: path.basename(thumbPath),
+        folder: path.dirname(thumbPath),
+        size: '320x180'
+      })
+      .on('end', () => resolve(true))
+      .on('error', (err) => {
+        console.error('Erro ao gerar miniatura:', err);
+        resolve(false);
+      });
+  });
 }
 
 // Funções auxiliares
@@ -68,58 +86,21 @@ function generateUniqueFilename(originalName, customName = null) {
   return `${base}_${timestamp}${ext}`;
 }
 
-/**
- * Obtém metadados básicos do vídeo (com fallback se FFmpeg não estiver disponível)
- */
 async function getVideoMetadata(filePath) {
-  if (!ffmpegAvailable) {
-    return { duration: 0, width: 0, height: 0 };
-  }
-
   return new Promise((resolve) => {
-    exec(`ffprobe -v error -show_entries format=duration -show_entries stream=width,height -of json "${filePath}"`,
-      (error, stdout) => {
-        if (error) {
-          console.warn('Erro ao obter metadados do vídeo, usando valores padrão');
-          resolve({ duration: 0, width: 0, height: 0 });
-        } else {
-          try {
-            const metadata = JSON.parse(stdout);
-            const videoStream = metadata.streams.find(s => s.width);
-            resolve({
-              duration: parseFloat(metadata.format.duration) || 0,
-              width: videoStream ? videoStream.width : 0,
-              height: videoStream ? videoStream.height : 0
-            });
-          } catch (e) {
-            resolve({ duration: 0, width: 0, height: 0 });
-          }
-        }
-      });
-  });
-}
-
-/**
- * Corrige metadados de vídeo se FFmpeg estiver disponível
- */
-async function fixVideoMetadata(filePath) {
-  if (!ffmpegAvailable) {
-    return filePath;
-  }
-
-  const fixedPath = filePath.replace(/(\.\w+)$/, '_fixed$1');
-  
-  return new Promise((resolve) => {
-    exec(`ffmpeg -i "${filePath}" -map_metadata 0 -c copy "${fixedPath}"`, 
-      (error) => {
-        if (error) {
-          console.error('Erro ao corrigir metadados, usando arquivo original');
-          resolve(filePath);
-        } else {
-          fs.unlinkSync(filePath);
-          resolve(fixedPath);
-        }
-      });
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) {
+        console.warn('Erro ao obter metadados:', err);
+        resolve({ duration: 0, width: 0, height: 0 });
+      } else {
+        const videoStream = metadata.streams.find(s => s.codec_type === 'video');
+        resolve({
+          duration: metadata.format.duration || 0,
+          width: videoStream?.width || 0,
+          height: videoStream?.height || 0
+        });
+      }
+    });
   });
 }
 
@@ -220,14 +201,40 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
     const fileExt = path.extname(filePath).toLowerCase();
     const isVideo = ['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(fileExt);
 
-    // Corrige metadados se for vídeo
-    let finalFilePath = filePath;
-    let videoMetadata = { duration: 0, width: 0, height: 0 };
-    
+    // Configurações de upload
+    const uploadOptions = {
+      file: filePath,
+      caption: finalCaption,
+      ...(threadId && { replyTo: threadId }),
+      progressCallback: (progress) => {
+        const percent = Math.round(progress * 100);
+        readline.clearLine(process.stdout, 0);
+        readline.cursorTo(process.stdout, 0);
+        process.stdout.write(`Upload: ${percent}%`);
+      }
+    };
+
+    // Tratamento especial para vídeos
     if (isVideo) {
-      finalFilePath = await fixVideoMetadata(filePath);
-      videoMetadata = await getVideoMetadata(finalFilePath);
-      console.log(`Metadados do vídeo - Duração: ${videoMetadata.duration}s`);
+      const thumbPath = path.join(UPLOAD_DIR, `thumb_${Date.now()}.jpg`);
+      const hasThumb = await generateThumbnail(filePath, thumbPath);
+
+      uploadOptions.supportsStreaming = true;
+      uploadOptions.mimeType = 'video/mp4';
+      uploadOptions.forceDocument = false;
+
+      if (hasThumb) {
+        uploadOptions.thumb = { path: thumbPath };
+      }
+
+      const { duration, width, height } = await getVideoMetadata(filePath);
+      uploadOptions.attributes = [{
+        _: 'documentAttributeVideo',
+        supportsStreaming: true,
+        duration: Math.floor(duration),
+        w: width,
+        h: height
+      }];
     }
 
     // Envia mensagem de status
@@ -241,34 +248,10 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
       console.error("⚠️ Não foi possível enviar mensagem de status:", statusError);
     }
 
-    // Configurações de envio
-    const uploadOptions = {
-      file: finalFilePath,
-      caption: finalCaption,
-      ...(threadId && { replyTo: threadId }),
-      progressCallback: (progress) => {
-        const percent = Math.round(progress * 100);
-        readline.clearLine(process.stdout, 0);
-        readline.cursorTo(process.stdout, 0);
-        process.stdout.write(`Upload: ${percent}%`);
-      }
-    };
-
-    if (isVideo) {
-      uploadOptions.supportsStreaming = true;
-      uploadOptions.attributes = [{
-        _: 'documentAttributeVideo',
-        supportsStreaming: true,
-        duration: Math.floor(videoMetadata.duration),
-        w: videoMetadata.width,
-        h: videoMetadata.height
-      }];
-    }
-
     // Envia o arquivo
     await client.sendFile(chatId, uploadOptions);
 
-    // Remove mensagem de status se existir
+    // Remove mensagem de status
     if (statusMessage) {
       try {
         await client.deleteMessages(chatId, [statusMessage.id], { revoke: true });
@@ -277,8 +260,13 @@ async function uploadFile(filePath, fileName, chatId, threadId = null, caption =
       }
     }
 
+    // Limpeza
+    fs.unlinkSync(filePath);
+    if (uploadOptions.thumb) {
+      fs.unlinkSync(uploadOptions.thumb.path);
+    }
+
     console.log(`\n✅ ${isVideo ? 'Vídeo' : 'Arquivo'} enviado: ${finalCaption}`);
-    fs.unlinkSync(finalFilePath);
     
   } catch (error) {
     console.error("\n❌ Erro ao enviar arquivo:", error);
@@ -304,7 +292,8 @@ app.post("/upload", async (req, res) => {
       success: true,
       message: "Arquivo enviado com sucesso!",
       fileName,
-      caption
+      caption,
+      isVideo: ['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(path.extname(filePath).toLowerCase())
     });
   } catch (error) {
     console.error("Erro no processamento:", error);
@@ -316,13 +305,14 @@ app.post("/upload", async (req, res) => {
 });
 
 app.get("/health", (req, res) => {
+  const ffmpegAvailable = !!ffmpeg.path;
   res.status(200).json({ 
     status: "healthy",
-    ffmpeg_available: ffmpegAvailable 
+    ffmpeg_available: ffmpegAvailable
   });
 });
 
 app.listen(port, () => {
   console.log(`Servidor rodando na porta ${port}`);
-  console.log(`FFmpeg disponível: ${ffmpegAvailable}`);
+  console.log(`FFmpeg ${ffmpeg.path ? 'disponível' : 'não disponível'}`);
 });
